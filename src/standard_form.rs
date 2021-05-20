@@ -1,372 +1,226 @@
 #![allow(non_snake_case)]
 
-use ndarray::linalg::Dot;
-
 use crate::problem::{Bound, Constraint, ConstraintOp, Problem, Variable, VariableId};
-use std::{borrow::Borrow, collections::HashMap};
+use std::borrow::Borrow;
 
-type VarMap = HashMap<VariableId, VarParts>;
-
-#[derive(Debug, Clone)]
-enum VarParts {
-    Pos(usize),
-    Neg(usize),
-    PosNeg(usize, usize),
-}
+use crate::util::EPS;
 
 #[derive(Debug, Clone)]
 pub struct StandardForm {
-    //note: first n variables will always corresponds to the original problem variables
-    //and likewise, the first m rows are for the original constraints
-    pub A: sprs::CsMat<f64>,
-    pub b: sprs::CsVec<f64>,
-    pub c: sprs::CsVec<f64>,
+    pub c: nalgebra::DVector<f64>,
+    pub A: nalgebra::DMatrix<f64>,
+    pub b: nalgebra::DVector<f64>,
+    pub bounds: Vec<Bound>,
 
-    //map from original variable to the columns in A corresponding to the positive
-    //and negative parts of the variable
-    var_map: VarMap,
+    //store the problem so we know that it is not mutated while using its standard form
+    prob: Problem,
 }
 
-struct StandardFormBuilder {
-    c_ind: Vec<usize>,
-    c_data: Vec<f64>,
-    A: sprs::TriMat<f64>,
-    b_ind: Vec<usize>,
-    b_data: Vec<f64>,
-    var_map: VarMap,
-    cur_row: usize,
-    cur_slack_col: usize,
-}
-
-impl StandardFormBuilder {
-    fn new(prob: &Problem) -> Self {
+impl std::convert::From<Problem> for StandardForm {
+    fn from(prob: Problem) -> StandardForm {
         let n = prob.vars().len();
         let m = prob.constraints().len();
 
-        let (var_map, num_bounds_constraints, mut total_vars) = Self::split_vars(prob);
-
-        let num_coeffs: usize = prob
-            .vars()
-            .iter()
-            .filter_map(|var| {
-                if var.obj_coeff != 0. {
-                    Some(match *var_map.get(&var.id).unwrap() {
-                        VarParts::Pos(..) => 1,
-                        VarParts::Neg(..) => 1,
-                        VarParts::PosNeg(..) => 2,
-                    })
-                } else {
-                    None
-                }
-            })
-            .sum();
-
-        total_vars += prob
+        let num_slack_vars = prob
             .constraints()
             .iter()
             .map(|constraint| match constraint.op {
-                ConstraintOp::Lte => 1,
-
+                ConstraintOp::Lte | ConstraintOp::Gte => 1,
                 ConstraintOp::Eq => 0,
-
-                ConstraintOp::Gte => 1,
             })
             .sum::<usize>();
 
-        let A = sprs::TriMat::new((m + num_bounds_constraints, total_vars));
+        let total_vars = n + num_slack_vars;
 
-        let b = vec![0.; A.rows()];
-        let cur_slack_col = A.cols() - 1;
+        let mut c = nalgebra::DVector::zeros(total_vars);
+        let mut A = nalgebra::DMatrix::zeros(m, total_vars);
+        let mut b = nalgebra::DVector::zeros(A.nrows());
 
-        println!(
-            "n: {}, num_bounds_constraints: {}, total_vars: {}",
-            n, num_bounds_constraints, total_vars
-        );
+        //default to Lower(0.), because that's what the slack variable bounds are
+        let mut bounds = vec![Bound::Lower(0.); total_vars];
 
-        println!("A cols: {}", A.cols());
-
-        StandardFormBuilder {
-            c_ind: Vec::with_capacity(num_coeffs),
-            c_data: Vec::with_capacity(num_coeffs),
-            A,
-            b_ind: Vec::with_capacity(num_coeffs),
-            b_data: Vec::with_capacity(num_coeffs),
-            var_map,
-            cur_row: 0,
-            cur_slack_col,
-        }
-    }
-
-    fn build(self) -> StandardForm {
-        assert!(self.cur_row == self.A.rows());
-
-        StandardForm {
-            A: self.A.to_csc(),
-            b: sprs::CsVec::new_from_unsorted(self.A.rows(), self.b_ind, self.b_data).unwrap(),
-            c: sprs::CsVec::new_from_unsorted(self.A.cols(), self.c_ind, self.c_data).unwrap(),
-            var_map: self.var_map,
-        }
-    }
-
-    fn add_obj_coeffs(&mut self, var: &Variable) {
-        println!("{:?}", self.var_map.get(&var.id).unwrap());
-        match *self.var_map.get(&var.id).unwrap() {
-            VarParts::Pos(i) => {
-                self.c_ind.push(i);
-                self.c_data.push(var.obj_coeff);
-            }
-
-            VarParts::Neg(i) => {
-                self.c_ind.push(i);
-                self.c_data.push(-var.obj_coeff);
-            }
-
-            VarParts::PosNeg(i1, i2) => {
-                self.c_ind.push(i1);
-                self.c_data.push(var.obj_coeff);
-
-                self.c_ind.push(i2);
-                self.c_data.push(-var.obj_coeff);
-            }
-        }
-    }
-
-    fn add_bound(&mut self, var: &Variable, rhs: f64, lower: bool) {
-        if rhs == 0. {
-            return;
-        }
-
-        let var_parts = self.var_map.get(&var.id).unwrap();
-        self.b_ind.push(self.cur_row);
-        self.b_data.push(rhs);
-
-        match *var_parts {
-            VarParts::Pos(i) => {
-                self.A.add_triplet(self.cur_row, i, 1.);
-            }
-
-            VarParts::Neg(i) => {
-                self.A.add_triplet(self.cur_row, i, -1.);
-            }
-
-            VarParts::PosNeg(i1, i2) => {
-                self.A.add_triplet(self.cur_row, i1, 1.);
-                self.A.add_triplet(self.cur_row, i2, -1.);
-            }
-        }
-
-        self.A.add_triplet(
-            self.cur_row,
-            self.cur_slack_col,
-            if lower { -1. } else { 1. },
-        );
-
-        self.cur_row += 1;
-        self.cur_slack_col -= 1;
-    }
-
-    fn add_constraint(&mut self, constraint: &Constraint) {
-        self.b_ind.push(self.cur_row);
-        self.b_data.push(constraint.rhs);
-
-        for (id, coeff) in &constraint.coeffs {
-            let var_parts = self.var_map.get(id).unwrap();
-
-            match *var_parts {
-                VarParts::Pos(i) => {
-                    self.A.add_triplet(self.cur_row, i, *coeff);
-                }
-
-                VarParts::Neg(i) => {
-                    self.A.add_triplet(self.cur_row, i, -coeff);
-                }
-
-                VarParts::PosNeg(i1, i2) => {
-                    self.A.add_triplet(self.cur_row, i1, *coeff);
-                    self.A.add_triplet(self.cur_row, i2, -coeff);
-                }
-            }
-        }
-
-        if let Some(slack_coeff) = match constraint.op {
-            ConstraintOp::Lte => Some(1.),
-            ConstraintOp::Eq => None,
-            ConstraintOp::Gte => Some(-1.),
-        } {
-            self.A
-                .add_triplet(self.cur_row, self.cur_slack_col, slack_coeff);
-            self.cur_slack_col -= 1;
-        }
-
-        self.cur_row += 1;
-    }
-
-    fn split_vars(prob: &Problem) -> (VarMap, usize, usize) {
-        let n = prob.vars().len();
-        let mut var_map = HashMap::with_capacity(n);
-        let mut next_col = n;
-        let mut num_extra_constraints = 0;
+        let mut cur_slack_col = A.ncols() - 1;
 
         for (i, var) in prob.vars().iter().enumerate() {
-            match var.bound {
-                Bound::Free => {
-                    var_map.insert(var.id, VarParts::PosNeg(i, next_col));
-                    next_col += 1;
-                }
+            c[i] = var.obj_coeff;
+            bounds[i] = var.bound;
+        }
 
-                Bound::Lower(lb) => {
-                    if lb >= 0. {
-                        var_map.insert(var.id, VarParts::Pos(i));
-                    } else {
-                        var_map.insert(var.id, VarParts::PosNeg(i, next_col));
-                        next_col += 1;
-                    }
+        for (i, constraint) in prob.constraints().iter().enumerate() {
+            b[i] = constraint.rhs;
 
-                    if lb != 0. {
-                        num_extra_constraints += 1;
-                    }
-                }
+            for (id, coeff) in &constraint.coeffs {
+                A[(i, id.into())] = *coeff;
+            }
 
-                Bound::Upper(ub) => {
-                    if ub >= 0. {
-                        var_map.insert(var.id, VarParts::PosNeg(i, next_col));
-                        next_col += 1;
-                    } else {
-                        var_map.insert(var.id, VarParts::Neg(i));
-                    }
-
-                    if ub != 0. {
-                        num_extra_constraints += 1;
-                    }
-                }
-
-                Bound::TwoSided(lb, ub) => {
-                    if lb == 0. {
-                        num_extra_constraints += 1;
-                    } else {
-                        num_extra_constraints += 2;
-                    }
-
-                    match (lb >= 0., ub >= 0.) {
-                        (true, true) => {
-                            var_map.insert(var.id, VarParts::Pos(i));
-                        }
-
-                        (true, false) => panic!("invalid bound: ({}, {})", lb, ub),
-
-                        (false, true) => {
-                            var_map.insert(var.id, VarParts::PosNeg(i, next_col));
-                            next_col += 1;
-                        }
-
-                        (false, false) => {
-                            var_map.insert(var.id, VarParts::Neg(i));
-                        }
-                    }
-                }
+            if let Some(slack_coeff) = match constraint.op {
+                ConstraintOp::Lte => Some(1.),
+                ConstraintOp::Eq => None,
+                ConstraintOp::Gte => Some(-1.),
+            } {
+                A[(i, cur_slack_col)] = slack_coeff;
+                cur_slack_col -= 1;
             }
         }
 
-        (
-            var_map,
-            num_extra_constraints,
-            next_col + num_extra_constraints, //add slack variables
-        )
-    }
-}
+        assert!(cur_slack_col == n - 1);
 
-impl<T> std::convert::From<T> for StandardForm
-where
-    T: Borrow<Problem>,
-{
-    fn from(prob: T) -> StandardForm {
-        let prob = prob.borrow();
-        let mut builder = StandardFormBuilder::new(prob);
-
-        for var in prob.vars() {
-            builder.add_obj_coeffs(var);
-
-            match var.bound {
-                Bound::Free => (),
-                Bound::Lower(lb) => builder.add_bound(var, lb, true),
-                Bound::Upper(ub) => builder.add_bound(var, ub, false),
-                Bound::TwoSided(lb, ub) => {
-                    builder.add_bound(var, lb, true);
-                    builder.add_bound(var, ub, false);
-                }
-            }
+        StandardForm {
+            c,
+            A,
+            b,
+            bounds,
+            prob,
         }
-
-        for constraint in prob.constraints() {
-            builder.add_constraint(constraint);
-        }
-
-        builder.build()
     }
 }
 
 impl StandardForm {
     pub fn rows(&self) -> usize {
-        self.A.rows()
+        self.A.nrows()
     }
 
     pub fn cols(&self) -> usize {
-        self.A.cols()
+        self.A.ncols()
     }
 
     //returns a feasible point
-    pub fn to_phase_1(&self) -> (StandardForm, ndarray::Array1<f64>) {
-        let num_vars = self.cols();
-        let num_new_vars = self.rows();
-        let total_vars = num_vars + num_new_vars;
+    pub fn phase_1(prob: Problem) -> (StandardForm, InitialPoint) {
+        let mut std_form: StandardForm = prob.into();
+        let n = std_form.cols();
+        let m = std_form.rows();
+        let mut N = Vec::with_capacity(m);
+        let mut B = Vec::with_capacity(n.checked_sub(m).unwrap_or(10));
 
-        let c_ind: Vec<_> = (num_vars..total_vars).collect();
-        let c_data = (0..c_ind.len()).map(|_x| 1.).collect();
-        let c = sprs::CsVec::new(total_vars, c_ind, c_data);
+        let mut v = nalgebra::DVector::<f64>::zeros(std_form.cols());
 
-        //note: appending the columns depends on A having a csc representation
-        assert!(self.A.outer_dims() == self.cols());
+        for (i, bound) in std_form.bounds.iter().enumerate() {
+            match *bound {
+                Bound::Free => (), //will set these values later
 
-        let m = self.rows();
-        let mut A = self.A.clone();
-
-        println!("phase1 before\n{:?}\n", A.to_dense());
-
-        let mut b_iter = self.b.iter().peekable();
-
-        for i in 0..num_new_vars {
-            let elem = if b_iter.peek().map(|&(ind, _b_i)| ind == i).unwrap_or(false) {
-                let (_ind, &b_i) = b_iter.next().unwrap();
-
-                if b_i >= 0. {
-                    1.
-                } else {
-                    -1.
+                Bound::Lower(lb) => {
+                    v[i] = lb;
+                    N.push(i);
                 }
-            } else {
-                1.
-            };
 
-            let new_col = sprs::CsVec::new(m, vec![i], vec![elem]);
-            A = A.append_outer_csvec(new_col.view());
+                Bound::Upper(ub) => {
+                    v[i] = ub;
+                    N.push(i);
+                }
+
+                Bound::TwoSided(lb, _ub) => {
+                    v[i] = lb;
+                    N.push(i);
+                }
+
+                Bound::Fixed(fixed_val) => {
+                    v[i] = fixed_val;
+                    N.push(i);
+                }
+            }
         }
 
-        println!("phase1\n{:?}", A.to_dense());
+        let free_vars: Vec<_> = std_form
+            .bounds
+            .iter()
+            .enumerate()
+            .filter_map(|(i, &bound)| {
+                if matches!(bound, Bound::Free) {
+                    Some(i)
+                } else {
+                    None
+                }
+            })
+            .collect();
 
-        let mut x0 = ndarray::Array1::zeros(total_vars);
+        let mut free_vars = nalgebra::DVector::from_vec(free_vars);
 
-        for (i, &b_i) in self.b.iter() {
-            x0[num_vars + i] = b_i.abs();
+        let cols: Vec<_> = free_vars.iter().map(|&i| std_form.A.column(i)).collect();
+        let A_F = nalgebra::DMatrix::from_columns(&cols);
+        let lu_decomp = A_F.full_piv_lu();
+
+        let rank = lu_decomp
+            .u()
+            .diagonal()
+            .iter()
+            .enumerate()
+            .find(|(_i, d)| d.abs() < EPS)
+            .map(|(i, _d)| i)
+            .unwrap_or_else(|| free_vars.len());
+
+        let P = lu_decomp.p();
+        let Q = lu_decomp.q();
+
+        Q.permute_rows(&mut free_vars);
+
+        for &i in free_vars.iter().take(rank) {
+            B.push(i);
         }
 
-        (
-            StandardForm {
-                A,
-                b: self.b.clone(),
-                c,
-                var_map: self.var_map.clone(),
-            },
-            x0,
-        )
+        for &i in free_vars.iter().skip(rank) {
+            std_form.bounds[i] = Bound::Fixed(0.);
+            N.push(i);
+        }
+
+        //don't need to use all the rows, but keeping it simpler for now
+        let mut b_tilde = &std_form.b - &std_form.A * &v;
+        P.permute_rows(&mut b_tilde);
+        let len = b_tilde.len();
+        let b_tilde = b_tilde.remove_rows(rank, len - rank);
+
+        let L = lu_decomp.l();
+        let L = L.slice((0, 0), (rank, rank));
+
+        let U = lu_decomp.u();
+        let U = U.slice((0, 0), (rank, rank));
+
+        //TODO might not have a solution?
+        let solution = U
+            .solve_upper_triangular(&L.solve_lower_triangular(&b_tilde).unwrap())
+            .unwrap();
+
+        assert!(solution.len() == rank);
+
+        for (i, v_i) in free_vars.iter().take(rank).zip(solution.iter()) {
+            v[*i] = *v_i;
+        }
+
+        let mut rows = nalgebra::DVector::from_vec((0..m).collect());
+        P.permute_rows(&mut rows);
+        let rows = rows.rows(rank, rows.len() - rank);
+
+        let b_tilde = &std_form.b - &std_form.A * &v;
+        let remaining = b_tilde.len().checked_sub(rank).unwrap();
+        let b_tilde = b_tilde.rows(0, remaining);
+
+        std_form.A = std_form.A.resize_horizontally(n + rows.len(), 0.);
+        v = v.resize_vertically(n + rows.len(), 0.);
+        let mut cur_col = std_form.A.ncols() - 1;
+
+        for &i in rows.iter() {
+            v[cur_col] = b_tilde[i].abs();
+            std_form.A[(i, cur_col)] = b_tilde[i].signum();
+            B.push(cur_col);
+            cur_col -= 1;
+        }
+
+        for c_i in &mut std_form.c {
+            *c_i = 0.;
+        }
+
+        std_form.c = std_form.c.resize_vertically(n + rows.len(), 1.);
+
+        for _ in &rows {
+            std_form.bounds.push(Bound::Lower(0.));
+        }
+
+        (std_form, InitialPoint { x: v, N, B })
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct InitialPoint {
+    pub x: nalgebra::DVector<f64>,
+    pub N: Vec<usize>,
+    pub B: Vec<usize>,
 }

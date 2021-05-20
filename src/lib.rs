@@ -31,19 +31,28 @@ mod tests {
             .add_var(1., Bound::Free, Some("x4".to_string()))
             .unwrap();
 
+        let x5 = prob
+            .add_var(0., Bound::Free, Some("x5".to_string()))
+            .unwrap();
+
         prob.add_constraint(vec![(x1, 2.5), (x2, 3.5)], ConstraintOp::Gte, 5.)
             .unwrap();
 
         prob.add_constraint(vec![(x2, 2.5), (x1, 4.5)], ConstraintOp::Lte, 1.)
             .unwrap();
 
-        prob.add_constraint(vec![(x3, -1.), (x4, -3.)], ConstraintOp::Eq, 2.)
+        prob.add_constraint(vec![(x3, -1.), (x4, -3.), (x5, -4.)], ConstraintOp::Eq, 2.)
             .unwrap();
+
+        // prob.add_constraint(vec![(x5, -8.)], ConstraintOp::Eq, 1.)
+        //     .unwrap();
 
         // println!("{:?}\n", std_form.c.to_dense());
         // println!("{:?}\n", std_form.A.to_dense());
         // println!("{:?}", std_form.b);
         let solver = Solver::new();
-        solver.solve(&prob, None);
+        solver.solve(prob, None);
+
+        //TODO test a system where free var constraints are infeasible
     }
 }

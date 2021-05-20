@@ -27,6 +27,18 @@ impl Problem {
             }
         }
 
+        let bound_valid = match bound {
+            Bound::Free => true,
+            Bound::Lower(lb) => lb.is_finite(),
+            Bound::Upper(ub) => ub.is_finite(),
+            Bound::TwoSided(lb, ub) => lb.is_finite() && ub.is_finite(),
+            Bound::Fixed(fixed_val) => fixed_val.is_finite(),
+        };
+
+        if !bound_valid {
+            return Err(EllPError::new(format!("invalid bound: {:?}", bound)));
+        }
+
         //TODO check that name is unique if it's provided
 
         let var = Variable::new(VariableId(self.variables.len()), obj_coeff, bound, name);
@@ -67,7 +79,7 @@ impl Problem {
         self.constraints.as_slice()
     }
 
-    pub fn is_feasible(&self, x: &ndarray::Array1<f64>) -> bool {
+    pub fn is_feasible(&self, x: &nalgebra::DVector<f64>) -> bool {
         if x.len() != self.variables.len() {
             return false;
         }
@@ -93,6 +105,12 @@ impl Problem {
                     }
 
                     if val > ub + EPS {
+                        return false;
+                    }
+                }
+
+                Bound::Fixed(fixed_val) => {
+                    if (val - fixed_val).abs() > EPS {
                         return false;
                     }
                 }
@@ -143,12 +161,13 @@ impl std::hash::Hash for Variable {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Bound {
     Free,
     Lower(f64),
     Upper(f64),
     TwoSided(f64, f64),
+    Fixed(f64),
 }
 
 #[derive(Debug, Clone)]
@@ -159,7 +178,7 @@ pub struct Constraint {
 }
 
 impl Constraint {
-    fn is_feasible(&self, x: &ndarray::Array1<f64>) -> bool {
+    fn is_feasible(&self, x: &nalgebra::DVector<f64>) -> bool {
         let mut lhs = 0.;
 
         for (var, coeff) in &self.coeffs {
