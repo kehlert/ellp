@@ -79,7 +79,7 @@ impl Problem {
         self.constraints.as_slice()
     }
 
-    pub fn is_feasible(&self, x: &nalgebra::DVector<f64>) -> bool {
+    pub fn is_feasible(&self, x: &[f64]) -> bool {
         if x.len() != self.variables.len() {
             return false;
         }
@@ -178,7 +178,7 @@ pub struct Constraint {
 }
 
 impl Constraint {
-    fn is_feasible(&self, x: &nalgebra::DVector<f64>) -> bool {
+    fn is_feasible(&self, x: &[f64]) -> bool {
         let mut lhs = 0.;
 
         for (var, coeff) in &self.coeffs {

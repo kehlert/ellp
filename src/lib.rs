@@ -28,7 +28,7 @@ mod tests {
             .unwrap();
 
         let x4 = prob
-            .add_var(1., Bound::Free, Some("x4".to_string()))
+            .add_var(1., Bound::Fixed(0.), Some("x4".to_string()))
             .unwrap();
 
         let x5 = prob
@@ -51,7 +51,8 @@ mod tests {
         // println!("{:?}\n", std_form.A.to_dense());
         // println!("{:?}", std_form.b);
         let solver = Solver::new();
-        solver.solve(prob, None);
+        let result = solver.solve(prob, None);
+        println!("RESULT:\n{:?}", result);
 
         //TODO test a system where free var constraints are infeasible
     }
