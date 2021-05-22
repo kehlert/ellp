@@ -1,9 +1,9 @@
 #![allow(non_snake_case)]
 
-use crate::problem::{Bound, Constraint, ConstraintOp, Problem, Variable, VariableId};
-use std::borrow::Borrow;
-
+use crate::problem::{Bound, ConstraintOp, Problem};
 use crate::util::EPS;
+
+use log::debug;
 
 #[derive(Debug, Clone)]
 pub struct StandardForm<'a> {
@@ -11,12 +11,19 @@ pub struct StandardForm<'a> {
     pub A: nalgebra::DMatrix<f64>,
     pub b: nalgebra::DVector<f64>,
     pub bounds: Vec<Bound>,
-    phase_1_vars: Option<Vec<usize>>,
     prob: &'a Problem,
+}
+
+#[derive(Debug)]
+pub struct StandardFormPhase1<'a> {
+    pub std_form: StandardForm<'a>,
+    phase_1_vars: Vec<usize>,
 }
 
 impl<'a> std::convert::From<&'a Problem> for StandardForm<'a> {
     fn from(prob: &'a Problem) -> StandardForm<'a> {
+        debug!("converting problem to standard form");
+
         let n = prob.vars().len();
         let m = prob.constraints().len();
 
@@ -70,7 +77,6 @@ impl<'a> std::convert::From<&'a Problem> for StandardForm<'a> {
             b,
             bounds,
             prob,
-            phase_1_vars: None,
         }
     }
 }
@@ -84,19 +90,21 @@ impl<'a> StandardForm<'a> {
         self.A.ncols()
     }
 
-    pub fn phase_1(prob: &'a Problem) -> (StandardForm<'a>, BasicFeasiblePoint) {
-        let mut std_form: StandardForm = prob.into();
-        let n = std_form.cols();
-        let m = std_form.rows();
+    pub fn obj(&self, x: &nalgebra::DVector<f64>) -> f64 {
+        self.c.dot(x)
+    }
+
+    pub fn phase_1(mut self) -> (StandardFormPhase1<'a>, BasicFeasiblePoint) {
+        debug!("converting standard form to phase 1 standard form");
+
+        let n = self.cols();
+        let m = self.rows();
         let mut N = Vec::with_capacity(m);
         let mut B = Vec::with_capacity(n.checked_sub(m).unwrap_or(10));
 
-        println!("orig A: {}", std_form.A);
-        println!("orig b: {}", std_form.b);
+        let mut v = nalgebra::DVector::<f64>::zeros(self.cols());
 
-        let mut v = nalgebra::DVector::<f64>::zeros(std_form.cols());
-
-        for (i, bound) in std_form.bounds.iter().enumerate() {
+        for (i, bound) in self.bounds.iter().enumerate() {
             match *bound {
                 Bound::Free => (), //will set these values later
 
@@ -138,7 +146,7 @@ impl<'a> StandardForm<'a> {
             }
         }
 
-        let free_vars: Vec<_> = std_form
+        let free_vars: Vec<_> = self
             .bounds
             .iter()
             .enumerate()
@@ -153,7 +161,7 @@ impl<'a> StandardForm<'a> {
 
         let mut free_vars = nalgebra::DVector::from_vec(free_vars);
 
-        let cols: Vec<_> = free_vars.iter().map(|&i| std_form.A.column(i)).collect();
+        let cols: Vec<_> = free_vars.iter().map(|&i| self.A.column(i)).collect();
         let A_F = nalgebra::DMatrix::from_columns(&cols);
         let lu_decomp = A_F.full_piv_lu();
 
@@ -176,7 +184,7 @@ impl<'a> StandardForm<'a> {
         }
 
         for &i in free_vars.iter().skip(rank) {
-            std_form.bounds[i] = Bound::Fixed(0.);
+            self.bounds[i] = Bound::Fixed(0.);
 
             N.push(Nonbasic {
                 index: i,
@@ -185,7 +193,7 @@ impl<'a> StandardForm<'a> {
         }
 
         //don't need to use all the rows, but keeping it simpler for now
-        let mut b_tilde = &std_form.b - &std_form.A * &v;
+        let mut b_tilde = &self.b - &self.A * &v;
         P.permute_rows(&mut b_tilde);
         let len = b_tilde.len();
         let b_tilde = b_tilde.remove_rows(rank, len - rank);
@@ -211,51 +219,67 @@ impl<'a> StandardForm<'a> {
         P.permute_rows(&mut rows);
         let rows = rows.rows(rank, rows.len() - rank);
 
-        let b_tilde = &std_form.b - &std_form.A * &v;
-        let remaining = b_tilde.len().checked_sub(rank).unwrap();
-        let b_tilde = b_tilde.rows(0, remaining);
+        let b_tilde = &self.b - &self.A * &v;
 
-        std_form.A = std_form.A.resize_horizontally(n + rows.len(), 0.);
+        self.A = self.A.resize_horizontally(n + rows.len(), 0.);
         v = v.resize_vertically(n + rows.len(), 0.);
-        let mut cur_col = std_form.A.ncols() - 1;
+        let mut cur_col = self.A.ncols() - 1;
 
         for &i in rows.iter() {
             v[cur_col] = b_tilde[i].abs();
-            std_form.A[(i, cur_col)] = b_tilde[i].signum();
+            self.A[(i, cur_col)] = b_tilde[i].signum();
             B.push(Basic::new(cur_col));
             cur_col -= 1;
         }
 
-        for c_i in &mut std_form.c {
+        for c_i in &mut self.c {
             *c_i = 0.;
         }
 
-        std_form.c = std_form.c.resize_vertically(n + rows.len(), 1.);
+        self.c = self.c.resize_vertically(n + rows.len(), 1.);
 
         let mut phase_1_vars = Vec::with_capacity(rows.len());
 
         for _ in &rows {
-            phase_1_vars.push(std_form.bounds.len());
-            std_form.bounds.push(Bound::Lower(0.));
+            phase_1_vars.push(self.bounds.len());
+            self.bounds.push(Bound::Lower(0.));
         }
 
-        std_form.phase_1_vars = Some(phase_1_vars);
-        (std_form, BasicFeasiblePoint { x: v, N, B })
+        (
+            StandardFormPhase1 {
+                std_form: self,
+                phase_1_vars,
+            },
+            BasicFeasiblePoint { x: v, N, B },
+        )
     }
+}
 
-    pub fn phase_2(mut self) -> StandardForm<'a> {
-        for i in self.phase_1_vars.as_ref().unwrap() {
-            self.bounds[*i] = Bound::Fixed(0.);
+impl<'a> StandardFormPhase1<'a> {
+    pub fn phase_2(self, bfp: &mut BasicFeasiblePoint) -> StandardForm<'a> {
+        debug!("converting phase 1 standard form to phase 2 standard form");
+
+        let mut std_form = self.std_form;
+
+        for i in &self.phase_1_vars {
+            std_form.bounds[*i] = Bound::Fixed(0.);
         }
 
-        for (i, var) in self.prob.vars().iter().enumerate() {
-            self.c[i] = var.obj_coeff;
+        for (i, var) in std_form.prob.vars().iter().enumerate() {
+            std_form.c[i] = var.obj_coeff;
 
             // some of the free variable bounds may have been set to Fixed(0)
-            self.bounds[i] = var.bound;
+            std_form.bounds[i] = var.bound;
         }
 
-        self
+        //needs to be after the above code, because it relies on std_form.bounds
+        for var in &mut bfp.N {
+            if matches!(std_form.bounds[var.index], Bound::Free) {
+                var.bound = NonbasicBound::Free;
+            }
+        }
+
+        std_form
     }
 }
 

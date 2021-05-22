@@ -6,15 +6,40 @@ mod util;
 
 pub use crate::problem::{Bound, Constraint, ConstraintOp, Problem, Variable};
 pub use crate::solver::Solver;
+
 #[cfg(test)]
 mod tests {
-    use crate::standard_form::StandardForm;
-
     use super::*;
+
+    fn setup_logger(log_level: log::LevelFilter) {
+        use fern::colors::{Color, ColoredLevelConfig};
+        let colors = ColoredLevelConfig::new()
+            .debug(Color::White)
+            .info(Color::Green)
+            .warn(Color::BrightYellow)
+            .error(Color::BrightRed);
+
+        fern::Dispatch::new()
+            .format(move |out, message, record| {
+                out.finish(format_args!(
+                    "{} | {:5} | {}",
+                    chrono::Local::now().format("%Y-%m-%d %H:%M:%S%.6f"),
+                    colors.color(record.level()),
+                    message
+                ))
+            })
+            .level(log_level)
+            .chain(std::io::stdout())
+            .apply()
+            .unwrap();
+    }
 
     #[test]
     fn it_works() {
+        setup_logger(log::LevelFilter::Trace);
+
         let mut prob = Problem::new();
+
         let x1 = prob
             .add_var(2., Bound::TwoSided(-1., 1.), Some("x1".to_string()))
             .unwrap();
@@ -44,14 +69,8 @@ mod tests {
         prob.add_constraint(vec![(x3, -1.), (x4, -3.), (x5, -4.)], ConstraintOp::Eq, 2.)
             .unwrap();
 
-        // prob.add_constraint(vec![(x5, -8.)], ConstraintOp::Eq, 1.)
-        //     .unwrap();
-
-        // println!("{:?}\n", std_form.c.to_dense());
-        // println!("{:?}\n", std_form.A.to_dense());
-        // println!("{:?}", std_form.b);
         let solver = Solver::new();
-        let result = solver.solve(prob, None);
+        let result = solver.solve(&prob, None);
         println!("RESULT:\n{:?}", result);
 
         //TODO test a system where free var constraints are infeasible
