@@ -36,9 +36,15 @@ impl Solver {
             let (result, std_form) = self.find_feasible_point(&prob);
 
             let feasible_point = match result {
-                SolverResult::Optimal(obj_val, bfp) => {
+                SolverResult::Optimal(obj_val, mut bfp) => {
                     assert!(obj_val > -EPS);
                     if obj_val < EPS {
+                        for var in &mut bfp.N {
+                            if matches!(std_form.bounds[var.index], Bound::Free) {
+                                var.bound = NonbasicBound::Free;
+                            }
+                        }
+
                         bfp
                     } else {
                         return SolverResult::Infeasible;
@@ -52,7 +58,7 @@ impl Solver {
 
             println!("feasible x: {}", feasible_point.x);
             assert!(prob.is_feasible(feasible_point.x.rows(0, prob.vars().len()).as_slice()));
-            // println!("{:#?}", std_form);
+            println!("{:#?}", std_form);
             self.solve_std_form(&std_form, feasible_point)
         } else {
             todo!()
@@ -112,37 +118,19 @@ impl Solver {
 
             //should always have a solution
             let u = lu_decomp.solve(&c_B).unwrap();
-            println!("u: {}", u);
-
-            println!(
-                "{}, ({}, {}), {}",
-                c_N.nrows(),
-                A_N.nrows(),
-                A_N.ncols(),
-                u.nrows()
-            );
 
             let r = &c_N - A_N.transpose() * u;
 
             //TODO find nonbasic to enter the basis
-
             println!("r: {}", r);
-
             println!("old x: {}", x);
             println!("old obj: {}", std_form.c.dot(&x));
 
-            println!("old nonbasic: {:?}", N);
-            println!("old basic: {:?}", B);
-
             let pivot_result = Self::pivot(&lu_decomp, &mut x, std_form, &r, &mut B, &mut N);
 
+            println!("pivot result: {:?}", pivot_result);
             println!("new x: {}", x);
             println!("new obj: {}", std_form.c.dot(&x));
-
-            println!("old A_B: {}", A_B);
-            println!("old A_N: {}", A_N);
-
-            println!("pivot result: {:?}", pivot_result);
 
             let pivot = match pivot_result {
                 PivotResult::Pivot(pivot) => pivot,
@@ -174,9 +162,6 @@ impl Solver {
                         std::mem::swap(x_i, y_i);
                     }
 
-                    println!("c_N: {}", c_N.len());
-                    println!("c_B: {}", c_B.len());
-
                     std::mem::swap(&mut c_N[pivot.nonbasic], &mut c_B[basic_index]);
                 }
 
@@ -185,17 +170,10 @@ impl Solver {
                     match nonbasic.bound {
                         NonbasicBound::Lower => nonbasic.bound = NonbasicBound::Upper,
                         NonbasicBound::Upper => nonbasic.bound = NonbasicBound::Lower,
+                        NonbasicBound::Free => panic!("pivot variable cannot be free"),
                     }
                 }
             }
-
-            println!("A_B: {}", A_B);
-            println!("A_N: {}", A_N);
-
-            // println!("d: {}", d);
-            // println!("lambda: {}", lambda);
-            println!("new_nonbasic: {:?}", N);
-            println!("new_basic: {:?}", B);
         }
 
         todo!()
@@ -245,11 +223,14 @@ impl Solver {
                 match (r_i > 0., &nonbasic.bound) {
                     (true, NonbasicBound::Upper) => Some((r_i, nonbasic, i)),
                     (false, NonbasicBound::Lower) => Some((-r_i, nonbasic, i)),
+                    (_, NonbasicBound::Free) => Some((r_i.abs(), nonbasic, i)),
                     _ => None,
                 }
             })
-            .max_by(|(r1, _N1, i1), (r2, _N2, i2)| r1.partial_cmp(r2).expect("NaN detected"))
+            .max_by(|(r1, _N1, _i1), (r2, _N2, _i2)| r1.partial_cmp(r2).expect("NaN detected"))
             .map(|(_r_i, pivot, i)| (pivot, i));
+
+        println!("pivot: {:?}", pivot);
 
         let pivot = match pivot {
             Some(pivot) => pivot,
@@ -257,9 +238,6 @@ impl Solver {
                 return PivotResult::Optimal;
             }
         };
-
-        println!("pivot: {:?}", pivot);
-        println!("r: {}", r);
 
         //should always have a solution
         let mut d = lu_decomp.solve(&std_form.A.column(pivot.0.index)).unwrap();

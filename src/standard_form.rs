@@ -251,7 +251,7 @@ impl<'a> StandardForm<'a> {
         for (i, var) in self.prob.vars().iter().enumerate() {
             self.c[i] = var.obj_coeff;
 
-            //some of the free variable bounds may have been set to Fixed(0)
+            // some of the free variable bounds may have been set to Fixed(0)
             self.bounds[i] = var.bound;
         }
 
@@ -282,6 +282,7 @@ impl Nonbasic {
 pub enum NonbasicBound {
     Lower,
     Upper,
+    Free,
 }
 
 #[derive(Debug, Clone, Copy)]
