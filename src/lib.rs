@@ -259,7 +259,6 @@ mod tests {
     #[test]
     fn small_prob_2() {
         // setup_logger(log::LevelFilter::Trace);
-
         let mut prob = Problem::new();
 
         let x = prob
@@ -267,7 +266,7 @@ mod tests {
             .unwrap();
 
         let y = prob
-            .add_var(-4., Bound::Lower(0.), Some("x".to_string()))
+            .add_var(-4., Bound::Lower(0.), Some("y".to_string()))
             .unwrap();
 
         prob.add_constraint(vec![(x, 1.)], ConstraintOp::Lte, 6.)
@@ -283,5 +282,91 @@ mod tests {
         let result = solver.solve(&prob).unwrap();
 
         assert_optimal(&result, -40., &[4., 5.]);
+    }
+
+    #[test]
+    fn linear_system_2d() {
+        let mut prob = Problem::new();
+
+        let x = prob
+            .add_var(0., Bound::Free, Some("x".to_string()))
+            .unwrap();
+
+        let y = prob
+            .add_var(0., Bound::Free, Some("y".to_string()))
+            .unwrap();
+
+        prob.add_constraint(vec![(x, 2.), (y, 1.)], ConstraintOp::Eq, 1.)
+            .unwrap();
+
+        prob.add_constraint(vec![(x, 3.), (y, 1.)], ConstraintOp::Eq, 1.)
+            .unwrap();
+
+        let solver = Solver::new();
+        let result = solver.solve(&prob).unwrap();
+
+        assert_optimal(&result, 0., &[0., 1.]);
+    }
+
+    #[test]
+    fn linear_system_3d() {
+        let mut prob = Problem::new();
+
+        let x = prob
+            .add_var(0., Bound::Free, Some("x".to_string()))
+            .unwrap();
+
+        let y = prob
+            .add_var(0., Bound::Free, Some("y".to_string()))
+            .unwrap();
+
+        let z = prob
+            .add_var(0., Bound::Free, Some("z".to_string()))
+            .unwrap();
+
+        prob.add_constraint(vec![(x, 1.), (y, 2.), (z, 4.)], ConstraintOp::Eq, 1.)
+            .unwrap();
+
+        prob.add_constraint(vec![(x, 3.), (y, 4.), (z, 8.)], ConstraintOp::Eq, 2.)
+            .unwrap();
+
+        prob.add_constraint(vec![(x, 5.), (y, 6.), (z, 13.)], ConstraintOp::Eq, 5.)
+            .unwrap();
+
+        let solver = Solver::new();
+        let result = solver.solve(&prob).unwrap();
+
+        assert_optimal(&result, 0., &[0., -3.5, 2.]);
+    }
+
+    #[test]
+    fn linear_system_3d_infeasible() {
+        let mut prob = Problem::new();
+
+        let x = prob
+            .add_var(0., Bound::Free, Some("x".to_string()))
+            .unwrap();
+
+        let y = prob
+            .add_var(0., Bound::Free, Some("y".to_string()))
+            .unwrap();
+
+        let z = prob
+            .add_var(0., Bound::Free, Some("z".to_string()))
+            .unwrap();
+
+        prob.add_constraint(vec![(x, 1.), (y, 2.), (z, 4.)], ConstraintOp::Eq, 1.)
+            .unwrap();
+
+        prob.add_constraint(vec![(x, 3.), (y, 4.), (z, 8.)], ConstraintOp::Eq, 2.)
+            .unwrap();
+
+        prob.add_constraint(vec![(x, 5.), (y, 6.), (z, 12.)], ConstraintOp::Eq, 5.)
+            .unwrap();
+
+        let solver = Solver::new();
+        let result = solver.solve(&prob).unwrap();
+
+        assert_infeasible(&result);
     }
 }
