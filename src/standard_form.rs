@@ -45,12 +45,12 @@ impl<'a> std::convert::From<&'a Problem> for StandardForm<'a> {
         //default to Lower(0.), because that's what the slack variable bounds are
         let mut bounds = vec![Bound::Lower(0.); total_vars];
 
-        let mut cur_slack_col = A.ncols() - 1;
-
         for (i, var) in prob.vars().iter().enumerate() {
             c[i] = var.obj_coeff;
             bounds[i] = var.bound;
         }
+
+        let mut cur_slack_col = A.ncols().saturating_sub(1);
 
         for (i, constraint) in prob.constraints().iter().enumerate() {
             b[i] = constraint.rhs;
@@ -69,7 +69,7 @@ impl<'a> std::convert::From<&'a Problem> for StandardForm<'a> {
             }
         }
 
-        assert!(cur_slack_col == n - 1);
+        assert!(cur_slack_col == n.saturating_sub(1));
 
         StandardForm {
             c,
@@ -92,6 +92,11 @@ impl<'a> StandardForm<'a> {
 
     pub fn obj(&self, x: &nalgebra::DVector<f64>) -> f64 {
         self.c.dot(x)
+    }
+
+    pub fn extract_solution(&self, bfp: &BasicFeasiblePoint) -> nalgebra::DVector<f64> {
+        let n = self.prob.vars().len();
+        bfp.x.rows(0, n).into()
     }
 
     pub fn phase_1(mut self) -> (StandardFormPhase1<'a>, BasicFeasiblePoint) {
@@ -145,8 +150,6 @@ impl<'a> StandardForm<'a> {
             }
         }
 
-        println!("N before: {:?}", N);
-
         for c_i in &mut self.c {
             *c_i = 0.;
         }
@@ -168,9 +171,10 @@ impl<'a> StandardForm<'a> {
 
         let mut free_vars = nalgebra::DVector::from_vec(free_vars);
 
-        if !free_vars.is_empty() {
+        if !free_vars.is_empty() && !self.A.is_empty() {
             let cols: Vec<_> = free_vars.iter().map(|&i| self.A.column(i)).collect();
             let A_F = nalgebra::DMatrix::from_columns(&cols);
+
             let lu_decomp = A_F.full_piv_lu();
             let rank = lu_decomp
                 .u()
@@ -189,8 +193,6 @@ impl<'a> StandardForm<'a> {
             for &i in free_vars.iter().take(rank) {
                 B.push(Basic::new(i));
             }
-
-            println!("free vars: {}, rank: {}", free_vars, rank);
 
             for &i in free_vars.iter().skip(rank) {
                 self.bounds[i] = Bound::Fixed(0.);
@@ -244,11 +246,16 @@ impl<'a> StandardForm<'a> {
                 cur_col -= 1;
             }
         } else {
+            //TODO don't need phase 1 variables for equality constraints
             let b_tilde = &self.b - &self.A * &v;
             v = v.resize_vertically(n + m, 0.);
+            self.A = self.A.resize_horizontally(n + m, 0.);
 
             for i in 0..m {
-                v[n + i] = b_tilde[i].abs();
+                let index = n + i;
+                v[index] = b_tilde[i].abs();
+                self.A[(i, index)] = b_tilde[i].signum();
+                B.push(Basic::new(index));
             }
         }
 
@@ -258,47 +265,6 @@ impl<'a> StandardForm<'a> {
             phase_1_vars.push(self.bounds.len());
             self.bounds.push(Bound::Lower(0.));
         }
-
-        println!("v: {}", v);
-        println!("A: {}", self.A);
-
-        // let mut x = nalgebra::DVector::zeros(n + m);
-        // let mut x_N = nalgebra::DVector::zeros(N.len());
-
-        // for (i, nonbasic) in N.enumerate() {
-        //     x_N[i] = match nonbasic.bound {
-        //         NonbasicBound::Free => 0.,
-
-        //         NonbasicBound::Lower => match self.bounds[nonbasic.index] {
-        //             Bound::Lower(lb) | Bound::TwoSided(lb, ..) | Bound::Fixed(lb) => lb,
-        //             _ => panic!("should not reach this"),
-        //         },
-
-        //         NonbasicBound::Upper => match self.bounds[nonbasic.index] {
-        //             Bound::Upper(ub) | Bound::TwoSided(ub, ..) | Bound::Fixed(ub) => ub,
-        //             _ => panic!("should not reach this"),cols
-        //         },
-        //     };
-
-        //     x[nonbasic.index] = x_N[i];
-        // }
-
-        // let B_cols: Vec<_> = B.iter().map(|&i| self.A.column(i.index)).collect();
-        // let A_B = nalgebra::DMatrix::from_columns(&B_cols);
-
-        // let N_cols: Vec<_> = B.iter().map(|&i| self.A.column(i.index)).collect();
-        // let A_N = nalgebra::DMatrix::from_columns(&N_cols);
-
-        // let x_B = A_B.solve(self.b - &A_N * x_N);
-        // assert_eq!(x_B.len(), B.len());
-
-        // for (x_i, basic) in x_B.iter().zip(&B) {
-        //     x[basic.index] = x_i;
-        // }
-
-        println!("v: {}", v);
-        println!("N: {:?}", N);
-        println!("B: {:?}", B);
 
         (
             StandardFormPhase1 {
@@ -311,6 +277,10 @@ impl<'a> StandardForm<'a> {
 }
 
 impl<'a> StandardFormPhase1<'a> {
+    pub fn obj(&self, x: &nalgebra::DVector<f64>) -> f64 {
+        self.std_form.obj(x)
+    }
+
     pub fn phase_2(self, bfp: &mut BasicFeasiblePoint) -> StandardForm<'a> {
         debug!("converting phase 1 standard form to phase 2 standard form");
 

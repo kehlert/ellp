@@ -40,19 +40,28 @@ impl Solver {
         debug!("initial basic feasible point:\n{:#?}", feasible_point);
         assert!(prob.is_feasible(feasible_point.x().rows(0, prob.vars().len()).as_slice()));
         self.solve_std_form(&std_form, feasible_point)
+            .map(|result| match result {
+                StandardFormResult::Optimal(bfp) => {
+                    let obj = std_form.obj(&bfp.x);
+                    let x = std_form.extract_solution(&bfp);
+                    SolverResult::Optimal(Solution { obj, x })
+                }
+
+                StandardFormResult::Infeasible => SolverResult::Infeasible,
+                StandardFormResult::Unbounded => SolverResult::Unbounded,
+            })
     }
 
     fn solve_std_form(
         &self,
         std_form: &StandardForm,
         mut init: BasicFeasiblePoint, //x0 assumed to be feasible
-    ) -> Result<SolverResult, EllPError> {
+    ) -> Result<StandardFormResult, EllPError> {
         if std_form.rows() == 0 {
             //trivial problem, and would run into errors if we proceed
             assert_eq!(std_form.c.len(), std_form.bounds.len());
             assert!(init.B.is_empty());
             let x = &mut init.x;
-            let mut obj = 0.;
             let N = &mut init.N;
             N.clear();
 
@@ -64,19 +73,17 @@ impl Solver {
             {
                 if c_i > 0. {
                     match *bound {
-                        Bound::Free | Bound::Upper(..) => return Ok(SolverResult::Unbounded),
+                        Bound::Free | Bound::Upper(..) => return Ok(StandardFormResult::Unbounded),
                         Bound::Lower(lb) | Bound::TwoSided(lb, ..) | Bound::Fixed(lb) => {
                             *x_i = lb;
-                            obj += c_i * lb;
                             N.push(Nonbasic::new(i, NonbasicBound::Lower));
                         }
                     }
                 } else if c_i < 0. {
                     match *bound {
-                        Bound::Free | Bound::Lower(..) => return Ok(SolverResult::Unbounded),
+                        Bound::Free | Bound::Lower(..) => return Ok(StandardFormResult::Unbounded),
                         Bound::Upper(ub) | Bound::TwoSided(.., ub) | Bound::Fixed(ub) => {
                             *x_i = ub;
-                            obj += c_i * ub;
                             N.push(Nonbasic::new(i, NonbasicBound::Upper));
                         }
                     }
@@ -85,21 +92,12 @@ impl Solver {
                 }
             }
 
-            return Ok(SolverResult::Optimal(obj, init));
+            return Ok(StandardFormResult::Optimal(init));
         }
 
         let mut B = init.B;
         let mut N = init.N;
         let mut x = init.x;
-
-        println!(
-            "{}, {}, {}, {}, {}",
-            B.len(),
-            std_form.rows(),
-            N.len(),
-            std_form.cols(),
-            std_form.cols().checked_sub(std_form.rows()).unwrap()
-        );
 
         if B.len() != std_form.rows() {
             return Err(EllPError::new(format!(
@@ -121,13 +119,16 @@ impl Solver {
 
         let B_cols: Vec<_> = B.iter().map(|i| std_form.A.column(i.index)).collect();
         let mut A_B = nalgebra::DMatrix::from_columns(&B_cols);
-
-        let N_cols: Vec<_> = N.iter().map(|i| std_form.A.column(i.index)).collect();
-        let mut A_N = nalgebra::DMatrix::from_columns(&N_cols);
-
         let mut c_B =
             nalgebra::DVector::from_iterator(B.len(), B.iter().map(|i| std_form.c[i.index]));
 
+        let N_cols: Vec<_> = N.iter().map(|i| std_form.A.column(i.index)).collect();
+
+        if N_cols.is_empty() {
+            return Ok(StandardFormResult::Optimal(BasicFeasiblePoint { x, B, N }));
+        }
+
+        let mut A_N = nalgebra::DMatrix::from_columns(&N_cols);
         let mut c_N =
             nalgebra::DVector::from_iterator(N.len(), N.iter().map(|i| std_form.c[i.index]));
 
@@ -156,13 +157,10 @@ impl Solver {
                 PivotResult::Pivot(pivot) => pivot,
 
                 PivotResult::Optimal => {
-                    return Ok(SolverResult::Optimal(
-                        std_form.c.dot(&x),
-                        BasicFeasiblePoint { x, B, N },
-                    ));
+                    return Ok(StandardFormResult::Optimal(BasicFeasiblePoint { x, B, N }));
                 }
 
-                PivotResult::Unbounded => return Ok(SolverResult::Unbounded),
+                PivotResult::Unbounded => return Ok(StandardFormResult::Unbounded),
             };
 
             let nonbasic = &mut N[pivot.nonbasic];
@@ -206,9 +204,10 @@ impl Solver {
         let (std_form_phase_1, x0) = std_form.phase_1();
 
         match self.solve_std_form(&std_form_phase_1.std_form, x0)? {
-            SolverResult::Optimal(obj_val, mut bfp) => {
-                assert!(obj_val > -EPS);
-                if obj_val < EPS {
+            StandardFormResult::Optimal(mut bfp) => {
+                let obj = std_form_phase_1.obj(&bfp.x);
+                assert!(obj > -EPS);
+                if obj < EPS {
                     let std_form = std_form_phase_1.phase_2(&mut bfp);
                     Ok(Phase1Result::Feasible(bfp, std_form))
                 } else {
@@ -216,8 +215,8 @@ impl Solver {
                 }
             }
 
-            SolverResult::Infeasible => Ok(Phase1Result::Infeasible),
-            SolverResult::Unbounded => Err(EllPError::new(
+            StandardFormResult::Infeasible => Ok(Phase1Result::Infeasible),
+            StandardFormResult::Unbounded => Err(EllPError::new(
                 "phase 1 problem is never unbounded".to_string(),
             )),
         }
@@ -372,10 +371,23 @@ struct Pivot {
 }
 
 #[derive(Debug)]
-pub enum SolverResult {
-    Optimal(f64, BasicFeasiblePoint),
+pub enum StandardFormResult {
+    Optimal(BasicFeasiblePoint),
     Infeasible,
     Unbounded,
+}
+
+#[derive(Debug)]
+pub enum SolverResult {
+    Optimal(Solution),
+    Infeasible,
+    Unbounded,
+}
+
+#[derive(Debug)]
+pub struct Solution {
+    pub obj: f64,
+    pub x: nalgebra::DVector<f64>,
 }
 
 #[derive(Debug)]
