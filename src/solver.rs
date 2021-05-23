@@ -7,6 +7,8 @@ use crate::{error::EllPError, problem::Problem};
 
 use log::{debug, trace};
 
+pub type EllPResult = Result<SolverResult, EllPError>;
+
 pub struct Solver {}
 
 impl std::default::Default for Solver {
@@ -20,57 +22,84 @@ impl Solver {
         Self {}
     }
 
-    pub fn solve(
-        &self,
-        prob: &Problem,
-        x0: Option<nalgebra::DVector<f64>>,
-    ) -> Result<SolverResult, EllPError> {
-        let n = prob.vars().len();
-        let x = x0.unwrap_or_else(|| {
-            debug!("initial point not provided, defaulting to the zero vector");
-            nalgebra::DVector::zeros(n)
-        });
-
-        if x.len() != n {
-            return Err(EllPError::new(format!(
-                "x0 dimensions invalid: {}, expected: {}",
-                x.len(),
-                n
-            )));
-        }
-
+    pub fn solve(&self, prob: &Problem) -> EllPResult {
         let mut std_form: StandardForm = prob.into();
 
-        let feasible_point = if !prob.is_feasible(x.as_slice()) {
-            debug!("initial point not feasible, will find a feasible point");
+        debug!("finding an initial basic feasible point");
 
-            match self.find_feasible_point(std_form)? {
-                Phase1Result::Feasible(bfp, modified_std_form) => {
-                    debug!("found feasible point");
-                    std_form = modified_std_form;
-                    bfp
-                }
-
-                Phase1Result::Infeasible => return Ok(SolverResult::Infeasible),
+        let feasible_point = match self.find_feasible_point(std_form)? {
+            Phase1Result::Feasible(bfp, modified_std_form) => {
+                debug!("found feasible point");
+                std_form = modified_std_form;
+                bfp
             }
-        } else {
-            todo!()
-            //self.solve(std_form, feasible_point)
+
+            Phase1Result::Infeasible => return Ok(SolverResult::Infeasible),
         };
 
         debug!("initial basic feasible point:\n{:#?}", feasible_point);
-        assert!(prob.is_feasible(feasible_point.x.rows(0, prob.vars().len()).as_slice()));
+        assert!(prob.is_feasible(feasible_point.x().rows(0, prob.vars().len()).as_slice()));
         self.solve_std_form(&std_form, feasible_point)
     }
 
     fn solve_std_form(
         &self,
         std_form: &StandardForm,
-        init: BasicFeasiblePoint, //x0 assumed to be feasible
+        mut init: BasicFeasiblePoint, //x0 assumed to be feasible
     ) -> Result<SolverResult, EllPError> {
+        if std_form.rows() == 0 {
+            //trivial problem, and would run into errors if we proceed
+            assert_eq!(std_form.c.len(), std_form.bounds.len());
+            assert!(init.B.is_empty());
+            let x = &mut init.x;
+            let mut obj = 0.;
+            let N = &mut init.N;
+            N.clear();
+
+            for (i, ((x_i, &c_i), bound)) in x
+                .iter_mut()
+                .zip(&std_form.c)
+                .zip(&std_form.bounds)
+                .enumerate()
+            {
+                if c_i > 0. {
+                    match *bound {
+                        Bound::Free | Bound::Upper(..) => return Ok(SolverResult::Unbounded),
+                        Bound::Lower(lb) | Bound::TwoSided(lb, ..) | Bound::Fixed(lb) => {
+                            *x_i = lb;
+                            obj += c_i * lb;
+                            N.push(Nonbasic::new(i, NonbasicBound::Lower));
+                        }
+                    }
+                } else if c_i < 0. {
+                    match *bound {
+                        Bound::Free | Bound::Lower(..) => return Ok(SolverResult::Unbounded),
+                        Bound::Upper(ub) | Bound::TwoSided(.., ub) | Bound::Fixed(ub) => {
+                            *x_i = ub;
+                            obj += c_i * ub;
+                            N.push(Nonbasic::new(i, NonbasicBound::Upper));
+                        }
+                    }
+                } else {
+                    *x_i = 0.; //can set to anything, but zero seems reasonable
+                }
+            }
+
+            return Ok(SolverResult::Optimal(obj, init));
+        }
+
         let mut B = init.B;
         let mut N = init.N;
         let mut x = init.x;
+
+        println!(
+            "{}, {}, {}, {}, {}",
+            B.len(),
+            std_form.rows(),
+            N.len(),
+            std_form.cols(),
+            std_form.cols().checked_sub(std_form.rows()).unwrap()
+        );
 
         if B.len() != std_form.rows() {
             return Err(EllPError::new(format!(
@@ -80,11 +109,13 @@ impl Solver {
             )));
         }
 
-        if N.len() != std_form.cols().checked_sub(std_form.rows()).unwrap() {
+        let expected_N_len = std_form.cols().checked_sub(std_form.rows()).unwrap();
+
+        if N.len() != expected_N_len {
             return Err(EllPError::new(format!(
                 "invalid N, has {} elements but {} expected",
                 N.len(),
-                std_form.rows(),
+                expected_N_len,
             )));
         }
 
@@ -102,6 +133,7 @@ impl Solver {
 
         //TODO set max iterations for the solver
         loop {
+            //TODO check that objective is nonincreasing
             debug!("obj: {}", std_form.obj(&x));
 
             //TODO avoid clone, and update LU decomp instead of recomputing it

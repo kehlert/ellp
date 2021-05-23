@@ -99,9 +99,8 @@ impl<'a> StandardForm<'a> {
 
         let n = self.cols();
         let m = self.rows();
-        let mut N = Vec::with_capacity(m);
+        let mut N = Vec::with_capacity(n);
         let mut B = Vec::with_capacity(n.checked_sub(m).unwrap_or(10));
-
         let mut v = nalgebra::DVector::<f64>::zeros(self.cols());
 
         for (i, bound) in self.bounds.iter().enumerate() {
@@ -146,6 +145,14 @@ impl<'a> StandardForm<'a> {
             }
         }
 
+        println!("N before: {:?}", N);
+
+        for c_i in &mut self.c {
+            *c_i = 0.;
+        }
+
+        self.c = self.c.resize_vertically(n + m, 1.);
+
         let free_vars: Vec<_> = self
             .bounds
             .iter()
@@ -161,89 +168,137 @@ impl<'a> StandardForm<'a> {
 
         let mut free_vars = nalgebra::DVector::from_vec(free_vars);
 
-        let cols: Vec<_> = free_vars.iter().map(|&i| self.A.column(i)).collect();
-        let A_F = nalgebra::DMatrix::from_columns(&cols);
-        let lu_decomp = A_F.full_piv_lu();
+        if !free_vars.is_empty() {
+            let cols: Vec<_> = free_vars.iter().map(|&i| self.A.column(i)).collect();
+            let A_F = nalgebra::DMatrix::from_columns(&cols);
+            let lu_decomp = A_F.full_piv_lu();
+            let rank = lu_decomp
+                .u()
+                .diagonal()
+                .iter()
+                .enumerate()
+                .find(|(_i, d)| d.abs() < EPS)
+                .map(|(i, _d)| i)
+                .unwrap_or_else(|| free_vars.len());
 
-        let rank = lu_decomp
-            .u()
-            .diagonal()
-            .iter()
-            .enumerate()
-            .find(|(_i, d)| d.abs() < EPS)
-            .map(|(i, _d)| i)
-            .unwrap_or_else(|| free_vars.len());
+            let P = lu_decomp.p();
+            let Q = lu_decomp.q();
 
-        let P = lu_decomp.p();
-        let Q = lu_decomp.q();
+            Q.permute_rows(&mut free_vars);
 
-        Q.permute_rows(&mut free_vars);
+            for &i in free_vars.iter().take(rank) {
+                B.push(Basic::new(i));
+            }
 
-        for &i in free_vars.iter().take(rank) {
-            B.push(Basic::new(i));
+            println!("free vars: {}, rank: {}", free_vars, rank);
+
+            for &i in free_vars.iter().skip(rank) {
+                self.bounds[i] = Bound::Fixed(0.);
+
+                N.push(Nonbasic {
+                    index: i,
+                    bound: NonbasicBound::Lower,
+                });
+            }
+
+            //don't need to use all the rows, but keeping it simpler for now
+            let mut b_tilde = &self.b - &self.A * &v;
+            P.permute_rows(&mut b_tilde);
+            let len = b_tilde.len();
+            let b_tilde = b_tilde.remove_rows(rank, len - rank);
+
+            let L = lu_decomp.l();
+            let L = L.slice((0, 0), (rank, rank));
+
+            let U = lu_decomp.u();
+            let U = U.slice((0, 0), (rank, rank));
+
+            //TODO might not have a solution?
+            let solution = U
+                .solve_upper_triangular(&L.solve_lower_triangular(&b_tilde).unwrap())
+                .unwrap();
+
+            assert!(solution.len() == rank);
+
+            for (i, v_i) in free_vars.iter().take(rank).zip(solution.iter()) {
+                v[*i] = *v_i;
+            }
+
+            let mut rows = nalgebra::DVector::from_vec((0..m).collect());
+            P.permute_rows(&mut rows);
+            let rows = rows.rows(rank, rows.len() - rank);
+
+            let b_tilde = &self.b - &self.A * &v;
+            v = v.resize_vertically(n + m, 0.);
+
+            for i in 0..m {
+                v[n + i] = b_tilde[i].abs();
+            }
+
+            self.A = self.A.resize_horizontally(n + rows.len(), 0.);
+            let mut cur_col = self.A.ncols() - 1;
+
+            for &i in rows.iter() {
+                self.A[(i, cur_col)] = b_tilde[i].signum();
+                B.push(Basic::new(cur_col));
+                cur_col -= 1;
+            }
+        } else {
+            let b_tilde = &self.b - &self.A * &v;
+            v = v.resize_vertically(n + m, 0.);
+
+            for i in 0..m {
+                v[n + i] = b_tilde[i].abs();
+            }
         }
 
-        for &i in free_vars.iter().skip(rank) {
-            self.bounds[i] = Bound::Fixed(0.);
+        let mut phase_1_vars = Vec::with_capacity(m);
 
-            N.push(Nonbasic {
-                index: i,
-                bound: NonbasicBound::Lower,
-            });
-        }
-
-        //don't need to use all the rows, but keeping it simpler for now
-        let mut b_tilde = &self.b - &self.A * &v;
-        P.permute_rows(&mut b_tilde);
-        let len = b_tilde.len();
-        let b_tilde = b_tilde.remove_rows(rank, len - rank);
-
-        let L = lu_decomp.l();
-        let L = L.slice((0, 0), (rank, rank));
-
-        let U = lu_decomp.u();
-        let U = U.slice((0, 0), (rank, rank));
-
-        //TODO might not have a solution?
-        let solution = U
-            .solve_upper_triangular(&L.solve_lower_triangular(&b_tilde).unwrap())
-            .unwrap();
-
-        assert!(solution.len() == rank);
-
-        for (i, v_i) in free_vars.iter().take(rank).zip(solution.iter()) {
-            v[*i] = *v_i;
-        }
-
-        let mut rows = nalgebra::DVector::from_vec((0..m).collect());
-        P.permute_rows(&mut rows);
-        let rows = rows.rows(rank, rows.len() - rank);
-
-        let b_tilde = &self.b - &self.A * &v;
-
-        self.A = self.A.resize_horizontally(n + rows.len(), 0.);
-        v = v.resize_vertically(n + rows.len(), 0.);
-        let mut cur_col = self.A.ncols() - 1;
-
-        for &i in rows.iter() {
-            v[cur_col] = b_tilde[i].abs();
-            self.A[(i, cur_col)] = b_tilde[i].signum();
-            B.push(Basic::new(cur_col));
-            cur_col -= 1;
-        }
-
-        for c_i in &mut self.c {
-            *c_i = 0.;
-        }
-
-        self.c = self.c.resize_vertically(n + rows.len(), 1.);
-
-        let mut phase_1_vars = Vec::with_capacity(rows.len());
-
-        for _ in &rows {
+        for _ in 0..m {
             phase_1_vars.push(self.bounds.len());
             self.bounds.push(Bound::Lower(0.));
         }
+
+        println!("v: {}", v);
+        println!("A: {}", self.A);
+
+        // let mut x = nalgebra::DVector::zeros(n + m);
+        // let mut x_N = nalgebra::DVector::zeros(N.len());
+
+        // for (i, nonbasic) in N.enumerate() {
+        //     x_N[i] = match nonbasic.bound {
+        //         NonbasicBound::Free => 0.,
+
+        //         NonbasicBound::Lower => match self.bounds[nonbasic.index] {
+        //             Bound::Lower(lb) | Bound::TwoSided(lb, ..) | Bound::Fixed(lb) => lb,
+        //             _ => panic!("should not reach this"),
+        //         },
+
+        //         NonbasicBound::Upper => match self.bounds[nonbasic.index] {
+        //             Bound::Upper(ub) | Bound::TwoSided(ub, ..) | Bound::Fixed(ub) => ub,
+        //             _ => panic!("should not reach this"),cols
+        //         },
+        //     };
+
+        //     x[nonbasic.index] = x_N[i];
+        // }
+
+        // let B_cols: Vec<_> = B.iter().map(|&i| self.A.column(i.index)).collect();
+        // let A_B = nalgebra::DMatrix::from_columns(&B_cols);
+
+        // let N_cols: Vec<_> = B.iter().map(|&i| self.A.column(i.index)).collect();
+        // let A_N = nalgebra::DMatrix::from_columns(&N_cols);
+
+        // let x_B = A_B.solve(self.b - &A_N * x_N);
+        // assert_eq!(x_B.len(), B.len());
+
+        // for (x_i, basic) in x_B.iter().zip(&B) {
+        //     x[basic.index] = x_i;
+        // }
+
+        println!("v: {}", v);
+        println!("N: {:?}", N);
+        println!("B: {:?}", B);
 
         (
             StandardFormPhase1 {
@@ -288,6 +343,12 @@ pub struct BasicFeasiblePoint {
     pub x: nalgebra::DVector<f64>,
     pub N: Vec<Nonbasic>,
     pub B: Vec<Basic>,
+}
+
+impl BasicFeasiblePoint {
+    pub fn x(&self) -> &nalgebra::DVector<f64> {
+        &self.x
+    }
 }
 
 #[derive(Debug, Clone)]

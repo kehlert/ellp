@@ -4,11 +4,14 @@ pub mod solver;
 mod standard_form;
 mod util;
 
+pub use crate::error::EllPError;
 pub use crate::problem::{Bound, Constraint, ConstraintOp, Problem, Variable};
-pub use crate::solver::Solver;
+pub use crate::solver::EllPResult;
+pub use crate::solver::{Solver, SolverResult};
 
 #[cfg(test)]
 mod tests {
+    use super::util::EPS;
     use super::*;
 
     fn setup_logger(log_level: log::LevelFilter) {
@@ -32,6 +35,48 @@ mod tests {
             .chain(std::io::stdout())
             .apply()
             .unwrap();
+    }
+
+    fn assert_optimal(result: &SolverResult, expected_obj: f64, expected_x: &[f64]) {
+        match result {
+            SolverResult::Optimal(obj, bfp) => {
+                let x = bfp.x();
+
+                assert!((*obj - expected_obj).abs() < EPS);
+                assert_eq!(x.len(), expected_x.len());
+
+                for (x1, x2) in x.iter().zip(expected_x) {
+                    assert!((x1 - x2).abs() < EPS);
+                }
+            }
+
+            _ => panic!("not optimal: {:?}", result),
+        }
+    }
+
+    fn assert_infeasible(result: &SolverResult) {
+        match result {
+            SolverResult::Infeasible => (),
+            _ => panic!("not infeasible: {:?}", result),
+        }
+    }
+
+    fn assert_unbounded(result: &SolverResult) {
+        match result {
+            SolverResult::Unbounded => (),
+            _ => panic!("not unbounded: {:?}", result),
+        }
+    }
+
+    #[test]
+    fn one_variable_no_constraints() {
+        let mut prob = Problem::new();
+        prob.add_var(2., Bound::TwoSided(-1., 1.), Some("x1".to_string()))
+            .unwrap();
+        let solver = Solver::new();
+        let result = solver.solve(&prob).unwrap();
+        println!("RESULT:\n{:#?}", result);
+        assert_optimal(&result, -2., &[-1.])
     }
 
     #[test]
@@ -70,7 +115,7 @@ mod tests {
             .unwrap();
 
         let solver = Solver::new();
-        let result = solver.solve(&prob, None);
+        let result = solver.solve(&prob);
         println!("RESULT:\n{:?}", result);
 
         //TODO test a system where free var constraints are infeasible
