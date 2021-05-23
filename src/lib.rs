@@ -211,7 +211,7 @@ mod tests {
 
     #[test]
     fn small_prob_1() {
-        // setup_logger(log::LevelFilter::Trace);
+        //setup_logger(log::LevelFilter::Trace);
 
         let mut prob = Problem::new();
 
@@ -258,7 +258,7 @@ mod tests {
 
     #[test]
     fn small_prob_2() {
-        setup_logger(log::LevelFilter::Trace);
+        // setup_logger(log::LevelFilter::Trace);
 
         let mut prob = Problem::new();
 
@@ -282,6 +282,6 @@ mod tests {
         let solver = Solver::new();
         let result = solver.solve(&prob).unwrap();
 
-        assert_optimal(&result, 40., &[4., 5.]);
+        assert_optimal(&result, -40., &[4., 5.]);
     }
 }

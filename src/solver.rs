@@ -38,7 +38,9 @@ impl Solver {
         };
 
         debug!("initial basic feasible point:\n{:#?}", feasible_point);
+
         assert!(prob.is_feasible(feasible_point.x().rows(0, prob.vars().len()).as_slice()));
+
         self.solve_std_form(&std_form, feasible_point)
             .map(|result| match result {
                 StandardFormResult::Optimal(bfp) => {
@@ -133,7 +135,7 @@ impl Solver {
             nalgebra::DVector::from_iterator(N.len(), N.iter().map(|i| std_form.c[i.index]));
 
         //TODO set max iterations for the solver
-        loop {
+        for _i in 0..5 {
             //TODO check that objective is nonincreasing
             debug!("obj: {}", std_form.obj(&x));
 
@@ -146,9 +148,25 @@ impl Solver {
                 ));
             }
 
-            //should always have a solution
-            let u = lu_decomp.solve(&c_B).unwrap();
+            //should always have a solution\
+            //(perhaps add solve_transpose to lu decomp? or .transpose() to lu_decomp?)
+            //would be a good contribution to nalgebra
+            let u_tilde = lu_decomp
+                .u()
+                .transpose()
+                .solve_lower_triangular(&c_B)
+                .unwrap();
+
+            let mut u = lu_decomp
+                .l()
+                .transpose()
+                .solve_upper_triangular(&u_tilde)
+                .unwrap();
+
+            lu_decomp.p().inv_permute_rows(&mut u);
+
             let r = &c_N - A_N.transpose() * u;
+
             let pivot_result = Self::pivot(&lu_decomp, &mut x, std_form, &r, &mut B, &mut N);
 
             trace!("pivot result: {:?}", pivot_result);
@@ -195,6 +213,8 @@ impl Solver {
                 }
             }
         }
+
+        todo!()
     }
 
     fn find_feasible_point<'a>(
@@ -276,6 +296,8 @@ impl Solver {
         assert!(d.len() == B.len());
 
         let mut new_basic = None;
+
+        assert!(B.len() == d.len());
 
         for (i, (basic, &d_i)) in B.iter_mut().zip(d.iter()).enumerate() {
             if d_i.abs() < EPS {

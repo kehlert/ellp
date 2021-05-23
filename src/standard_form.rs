@@ -287,6 +287,7 @@ impl<'a> StandardFormPhase1<'a> {
         let mut std_form = self.std_form;
 
         for i in &self.phase_1_vars {
+            std_form.c[*i] = 0.;
             std_form.bounds[*i] = Bound::Fixed(0.);
         }
 
