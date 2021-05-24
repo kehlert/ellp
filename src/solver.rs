@@ -135,7 +135,7 @@ impl Solver {
             nalgebra::DVector::from_iterator(N.len(), N.iter().map(|i| std_form.c[i.index]));
 
         //TODO set max iterations for the solver
-        for _i in 0..15 {
+        for _i in 0..10 {
             //TODO check that objective is nonincreasing
             debug!("obj: {}", std_form.obj(&x));
 
@@ -260,7 +260,14 @@ impl Solver {
                     _ => None,
                 }
             })
-            .max_by(|(r1, _N1, _i1), (r2, _N2, _i2)| r1.partial_cmp(r2).expect("NaN detected"))
+            .max_by(|(r1, N1, _i1), (r2, N2, _i2)| {
+                //this logic breaks cycles (smallest subscript rule)
+                if (r1 - r2).abs() < EPS {
+                    r1.partial_cmp(r2).expect("NaN detected")
+                } else {
+                    N1.index.cmp(&N2.index)
+                }
+            })
             .map(|(_r_i, pivot, i)| (pivot, i));
 
         let pivot = match pivot {
@@ -290,6 +297,7 @@ impl Solver {
         assert!(d.len() == B.len());
 
         let mut new_basic = None;
+        let mut new_basic_index = None;
 
         assert!(B.len() == d.len());
 
@@ -332,7 +340,7 @@ impl Solver {
 
             trace!("i: {}, lambda_i: {}, lambda: {}", i, lambda_i, lambda);
 
-            if lambda_i < lambda {
+            if lambda_i < lambda - EPS {
                 lambda = lambda_i;
 
                 if d_i > 0. {
@@ -340,6 +348,20 @@ impl Solver {
                 } else {
                     new_basic = Some((i, NonbasicBound::Lower));
                 };
+            } else if (lambda_i - lambda) < EPS {
+                //this logic breaks cycles (smallest subscript rule)
+                if let Some(index) = new_basic_index {
+                    if basic.index < index {
+                        new_basic_index = Some(basic.index);
+                        lambda = lambda_i;
+
+                        if d_i > 0. {
+                            new_basic = Some((i, NonbasicBound::Upper));
+                        } else {
+                            new_basic = Some((i, NonbasicBound::Lower));
+                        };
+                    }
+                }
             }
         }
 

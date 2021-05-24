@@ -527,7 +527,6 @@ mod tests {
 
     #[test]
     fn small_prob_5() {
-        //NOTE: this problem has multiple optimal points, so we only test the objective value
         let mut prob = Problem::new();
 
         let x = prob
@@ -560,7 +559,6 @@ mod tests {
 
     #[test]
     fn small_prob_6() {
-        //NOTE: this problem has multiple optimal points, so we only test the objective value
         let mut prob = Problem::new();
 
         let x = prob
@@ -597,5 +595,49 @@ mod tests {
         let solver = Solver::new();
         let result = solver.solve(&prob).unwrap();
         assert_optimal(&result, -6.5, &[1., 1., 0.5, 0.]);
+    }
+
+    #[test]
+    fn beale_cycle() {
+        // setup_logger(log::LevelFilter::Trace);
+
+        let mut prob = Problem::new();
+
+        let x = prob
+            .add_var(-10., Bound::Lower(0.), Some("x".to_string()))
+            .unwrap();
+
+        let y = prob
+            .add_var(57., Bound::Lower(0.), Some("y".to_string()))
+            .unwrap();
+
+        let z = prob
+            .add_var(9., Bound::Lower(0.), Some("z".to_string()))
+            .unwrap();
+
+        let w = prob
+            .add_var(24., Bound::Lower(0.), Some("w".to_string()))
+            .unwrap();
+
+        prob.add_constraint(
+            vec![(x, -0.5), (y, 5.5), (z, 2.5), (w, -9.)],
+            ConstraintOp::Gte,
+            0.,
+        )
+        .unwrap();
+
+        prob.add_constraint(
+            vec![(x, -0.5), (y, 1.5), (z, 0.5), (w, -1.)],
+            ConstraintOp::Gte,
+            0.,
+        )
+        .unwrap();
+
+        prob.add_constraint(vec![(x, -1.)], ConstraintOp::Gte, -1.)
+            .unwrap();
+
+        let solver = Solver::new();
+        let result = solver.solve(&prob).unwrap();
+        assert_optimal(&result, -1., &[1., 0., 1., 0.]);
     }
 }
