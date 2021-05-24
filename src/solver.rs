@@ -135,7 +135,7 @@ impl Solver {
             nalgebra::DVector::from_iterator(N.len(), N.iter().map(|i| std_form.c[i.index]));
 
         //TODO set max iterations for the solver
-        for _i in 0..5 {
+        for _i in 0..15 {
             //TODO check that objective is nonincreasing
             debug!("obj: {}", std_form.obj(&x));
 
@@ -171,7 +171,7 @@ impl Solver {
 
             trace!("pivot result: {:?}", pivot_result);
 
-            let pivot = match pivot_result? {
+            let pivot = match pivot_result {
                 PivotResult::Pivot(pivot) => pivot,
 
                 PivotResult::Optimal => {
@@ -183,35 +183,22 @@ impl Solver {
 
             let nonbasic = &mut N[pivot.nonbasic];
 
-            match pivot.basic {
-                Some((basic_index, bound)) => {
-                    //basic variable becomes nonbasic, and vice versa
-                    std::mem::swap(&mut B[basic_index].index, &mut nonbasic.index);
+            let (basic_index, bound) = pivot.basic;
 
-                    nonbasic.bound = bound;
+            //basic variable becomes nonbasic, and vice versa
+            std::mem::swap(&mut B[basic_index].index, &mut nonbasic.index);
 
-                    for (x_i, y_i) in A_N
-                        .column_mut(pivot.nonbasic)
-                        .iter_mut()
-                        .zip(A_B.column_mut(basic_index).iter_mut())
-                    {
-                        std::mem::swap(x_i, y_i);
-                    }
+            nonbasic.bound = bound;
 
-                    std::mem::swap(&mut c_N[pivot.nonbasic], &mut c_B[basic_index]);
-                }
-
-                None => {
-                    //the pivot variable stays nonbasic
-                    match nonbasic.bound {
-                        NonbasicBound::Lower => nonbasic.bound = NonbasicBound::Upper,
-                        NonbasicBound::Upper => nonbasic.bound = NonbasicBound::Lower,
-                        NonbasicBound::Free => {
-                            return Err(EllPError::new("pivot variable cannot be free".to_string()))
-                        }
-                    }
-                }
+            for (x_i, y_i) in A_N
+                .column_mut(pivot.nonbasic)
+                .iter_mut()
+                .zip(A_B.column_mut(basic_index).iter_mut())
+            {
+                std::mem::swap(x_i, y_i);
             }
+
+            std::mem::swap(&mut c_N[pivot.nonbasic], &mut c_B[basic_index]);
         }
 
         todo!()
@@ -249,14 +236,20 @@ impl Solver {
         r: &nalgebra::DVector<f64>,
         B: &'a mut [Basic],
         N: &'a mut [Nonbasic],
-    ) -> Result<PivotResult, EllPError> {
+    ) -> PivotResult {
+        trace!("\n-------------------\nobj: {}", std_form.obj(x));
+        trace!("bounds: {:?}", std_form.bounds);
+        trace!("B: {:?}", B);
+        trace!("N: {:?}", N);
+        trace!("r: {}", r);
+
         //TODO avoid cycles
         let pivot = N
             .iter_mut()
             .enumerate()
             .zip(r.iter())
             .filter_map(|((i, nonbasic), &r_i)| {
-                if r_i.abs() < EPS {
+                if r_i.abs() < EPS || matches!(std_form.bounds[nonbasic.index], Bound::Fixed(..)) {
                     return None;
                 }
 
@@ -272,9 +265,7 @@ impl Solver {
 
         let pivot = match pivot {
             Some(pivot) => pivot,
-            None => {
-                return Ok(PivotResult::Optimal);
-            }
+            None => return PivotResult::Optimal,
         };
 
         //should always have a solution
@@ -285,12 +276,15 @@ impl Solver {
             d = -d;
         }
 
+        trace!("d: {}", d);
+        trace!("pivot: {:?}", pivot);
+
         let mut lambda = match std_form.bounds[pivot.0.index] {
             Bound::Free => f64::INFINITY,
             Bound::Lower(..) => f64::INFINITY,
             Bound::Upper(..) => f64::INFINITY,
             Bound::TwoSided(lb, ub) => ub - lb,
-            Bound::Fixed(..) => 0.,
+            Bound::Fixed(..) => panic!("pivot variable's bound should not be Fixed"),
         };
 
         assert!(d.len() == B.len());
@@ -333,12 +327,10 @@ impl Solver {
                     }
                 }
 
-                Bound::Fixed(..) => {
-                    return Err(EllPError::new(
-                        "fixed variable should not be basic".to_string(),
-                    ))
-                }
+                Bound::Fixed(..) => 0.,
             };
+
+            trace!("i: {}, lambda_i: {}, lambda: {}", i, lambda_i, lambda);
 
             if lambda_i < lambda {
                 lambda = lambda_i;
@@ -353,7 +345,13 @@ impl Solver {
 
         assert!(lambda >= 0.);
 
-        if lambda > 0. && lambda.is_finite() {
+        if lambda.is_infinite() {
+            return PivotResult::Unbounded;
+        }
+
+        let new_basic = new_basic.unwrap();
+
+        if lambda > 0. {
             for (B_i, d_i) in B.iter().zip(d.iter()) {
                 x[B_i.index] += lambda * d_i;
             }
@@ -366,15 +364,19 @@ impl Solver {
 
             //to access the basic varbiable, need to use an index rather than a reference
             //because of Rust's borrowing rules
-            Ok(PivotResult::Pivot(Pivot {
+            PivotResult::Pivot(Pivot {
                 basic: new_basic,
                 nonbasic: pivot.1,
-            }))
+            })
         } else if lambda == 0. {
-            Ok(PivotResult::Optimal)
+            // PivotResult::Optimal
+            PivotResult::Pivot(Pivot {
+                basic: new_basic,
+                nonbasic: pivot.1,
+            })
         } else {
             //lambda == infinity
-            Ok(PivotResult::Unbounded)
+            PivotResult::Unbounded
         }
     }
 }
@@ -388,7 +390,7 @@ enum PivotResult {
 
 #[derive(Debug)]
 struct Pivot {
-    basic: Option<(usize, NonbasicBound)>,
+    basic: (usize, NonbasicBound),
     nonbasic: usize,
 }
 

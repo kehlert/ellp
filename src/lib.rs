@@ -58,6 +58,21 @@ mod tests {
         }
     }
 
+    fn assert_optimal_obj(result: &SolverResult, expected_obj: f64) {
+        match result {
+            SolverResult::Optimal(sol) => {
+                assert!(
+                    (sol.obj - expected_obj).abs() < EPS,
+                    "obj: {}, expected: {}",
+                    sol.obj,
+                    expected_obj
+                );
+            }
+
+            _ => panic!("not optimal: {:?}", result),
+        }
+    }
+
     fn assert_infeasible(result: &SolverResult) {
         match result {
             SolverResult::Infeasible => (),
@@ -210,81 +225,6 @@ mod tests {
     }
 
     #[test]
-    fn small_prob_1() {
-        //setup_logger(log::LevelFilter::Trace);
-
-        let mut prob = Problem::new();
-
-        let x1 = prob
-            .add_var(2., Bound::TwoSided(-1., 1.), Some("x1".to_string()))
-            .unwrap();
-
-        let x2 = prob
-            .add_var(10., Bound::Upper(6.), Some("x2".to_string()))
-            .unwrap();
-
-        let x3 = prob
-            .add_var(0., Bound::Lower(0.), Some("x3".to_string()))
-            .unwrap();
-
-        let x4 = prob
-            .add_var(1., Bound::Fixed(0.), Some("x4".to_string()))
-            .unwrap();
-
-        let x5 = prob
-            .add_var(0., Bound::Free, Some("x5".to_string()))
-            .unwrap();
-
-        prob.add_constraint(vec![(x1, 2.5), (x2, 3.5)], ConstraintOp::Gte, 5.)
-            .unwrap();
-
-        prob.add_constraint(vec![(x2, 2.5), (x1, 4.5)], ConstraintOp::Lte, 1.)
-            .unwrap();
-
-        prob.add_constraint(vec![(x3, -1.), (x4, -3.), (x5, -4.)], ConstraintOp::Eq, 2.)
-            .unwrap();
-
-        let solver = Solver::new();
-        let result = solver.solve(&prob).unwrap();
-
-        assert_optimal(
-            &result,
-            19.1578947368421,
-            &[-0.94736842105, 2.105263157894, 0., 0., -0.5],
-        )
-
-        //TODO test a system where free var constraints are infeasible
-    }
-
-    #[test]
-    fn small_prob_2() {
-        // setup_logger(log::LevelFilter::Trace);
-        let mut prob = Problem::new();
-
-        let x = prob
-            .add_var(-5., Bound::Lower(0.), Some("x".to_string()))
-            .unwrap();
-
-        let y = prob
-            .add_var(-4., Bound::Lower(0.), Some("y".to_string()))
-            .unwrap();
-
-        prob.add_constraint(vec![(x, 1.)], ConstraintOp::Lte, 6.)
-            .unwrap();
-
-        prob.add_constraint(vec![(x, 0.25), (y, 1.)], ConstraintOp::Lte, 6.)
-            .unwrap();
-
-        prob.add_constraint(vec![(x, 3.), (y, 2.)], ConstraintOp::Lte, 22.)
-            .unwrap();
-
-        let solver = Solver::new();
-        let result = solver.solve(&prob).unwrap();
-
-        assert_optimal(&result, -40., &[4., 5.]);
-    }
-
-    #[test]
     fn linear_system_2d() {
         let mut prob = Problem::new();
 
@@ -368,5 +308,294 @@ mod tests {
         let result = solver.solve(&prob).unwrap();
 
         assert_infeasible(&result);
+    }
+
+    #[test]
+    fn small_prob_1() {
+        //setup_logger(log::LevelFilter::Trace);
+
+        let mut prob = Problem::new();
+
+        let x1 = prob
+            .add_var(2., Bound::TwoSided(-1., 1.), Some("x1".to_string()))
+            .unwrap();
+
+        let x2 = prob
+            .add_var(10., Bound::Upper(6.), Some("x2".to_string()))
+            .unwrap();
+
+        let x3 = prob
+            .add_var(0., Bound::Lower(0.), Some("x3".to_string()))
+            .unwrap();
+
+        let x4 = prob
+            .add_var(1., Bound::Fixed(0.), Some("x4".to_string()))
+            .unwrap();
+
+        let x5 = prob
+            .add_var(0., Bound::Free, Some("x5".to_string()))
+            .unwrap();
+
+        prob.add_constraint(vec![(x1, 2.5), (x2, 3.5)], ConstraintOp::Gte, 5.)
+            .unwrap();
+
+        prob.add_constraint(vec![(x2, 2.5), (x1, 4.5)], ConstraintOp::Lte, 1.)
+            .unwrap();
+
+        prob.add_constraint(vec![(x3, -1.), (x4, -3.), (x5, -4.)], ConstraintOp::Eq, 2.)
+            .unwrap();
+
+        let solver = Solver::new();
+        let result = solver.solve(&prob).unwrap();
+
+        assert_optimal(
+            &result,
+            19.1578947368421,
+            &[-0.94736842105, 2.105263157894, 0., 0., -0.5],
+        )
+
+        //TODO test a system where free var constraints are infeasible
+    }
+
+    #[test]
+    fn small_prob_2() {
+        // setup_logger(log::LevelFilter::Trace);
+        let mut prob = Problem::new();
+
+        let x = prob
+            .add_var(-5., Bound::Lower(0.), Some("x".to_string()))
+            .unwrap();
+
+        let y = prob
+            .add_var(-4., Bound::Lower(0.), Some("y".to_string()))
+            .unwrap();
+
+        prob.add_constraint(vec![(x, 1.)], ConstraintOp::Lte, 6.)
+            .unwrap();
+
+        prob.add_constraint(vec![(x, 0.25), (y, 1.)], ConstraintOp::Lte, 6.)
+            .unwrap();
+
+        prob.add_constraint(vec![(x, 3.), (y, 2.)], ConstraintOp::Lte, 22.)
+            .unwrap();
+
+        let solver = Solver::new();
+        let result = solver.solve(&prob).unwrap();
+
+        assert_optimal(&result, -40., &[4., 5.]);
+    }
+
+    #[test]
+    fn small_prob_3() {
+        // setup_logger(log::LevelFilter::Trace);
+        let mut prob = Problem::new();
+
+        let x = prob
+            .add_var(3., Bound::Lower(0.), Some("x".to_string()))
+            .unwrap();
+
+        let y = prob
+            .add_var(-6., Bound::Lower(0.), Some("y".to_string()))
+            .unwrap();
+
+        prob.add_constraint(vec![(x, 1.), (y, 2.)], ConstraintOp::Gte, -1.)
+            .unwrap();
+
+        prob.add_constraint(vec![(x, 2.), (y, 1.)], ConstraintOp::Gte, 0.)
+            .unwrap();
+
+        prob.add_constraint(vec![(x, 1.), (y, -1.)], ConstraintOp::Gte, -1.)
+            .unwrap();
+
+        prob.add_constraint(vec![(x, 1.), (y, -4.)], ConstraintOp::Gte, -13.)
+            .unwrap();
+
+        prob.add_constraint(vec![(x, -4.), (y, 1.)], ConstraintOp::Gte, -23.)
+            .unwrap();
+
+        let solver = Solver::new();
+        let result = solver.solve(&prob).unwrap();
+
+        assert_optimal(&result, -15., &[3., 4.]);
+    }
+
+    #[test]
+    fn small_prob_unbounded_1() {
+        // setup_logger(log::LevelFilter::Trace);
+        let mut prob = Problem::new();
+
+        let x = prob
+            .add_var(-2., Bound::Lower(0.), Some("x".to_string()))
+            .unwrap();
+
+        let y = prob
+            .add_var(-3., Bound::Lower(0.), Some("y".to_string()))
+            .unwrap();
+
+        let z = prob
+            .add_var(1., Bound::Lower(0.), Some("z".to_string()))
+            .unwrap();
+
+        prob.add_constraint(vec![(x, 1.), (y, 1.), (z, 1.)], ConstraintOp::Gte, -3.)
+            .unwrap();
+
+        prob.add_constraint(vec![(x, -1.), (y, 1.), (z, -1.)], ConstraintOp::Gte, -4.)
+            .unwrap();
+
+        prob.add_constraint(vec![(x, 1.), (y, -1.), (z, -2.)], ConstraintOp::Gte, -1.)
+            .unwrap();
+
+        let solver = Solver::new();
+        let result = solver.solve(&prob).unwrap();
+
+        assert_unbounded(&result);
+    }
+
+    #[test]
+    fn small_prob_unbounded_2() {
+        // setup_logger(log::LevelFilter::Trace);
+        let mut prob = Problem::new();
+
+        let x = prob
+            .add_var(-2., Bound::Lower(0.), Some("x".to_string()))
+            .unwrap();
+
+        let y = prob
+            .add_var(-3., Bound::Lower(0.), Some("y".to_string()))
+            .unwrap();
+
+        let z = prob
+            .add_var(1., Bound::Lower(0.), Some("z".to_string()))
+            .unwrap();
+
+        let w = prob
+            .add_var(1., Bound::Lower(0.), Some("w".to_string()))
+            .unwrap();
+
+        prob.add_constraint(vec![(y, 1.), (z, -2.), (w, -1.)], ConstraintOp::Gte, -4.)
+            .unwrap();
+
+        prob.add_constraint(
+            vec![(x, 2.), (y, -1.), (z, -1.), (w, 4.)],
+            ConstraintOp::Gte,
+            -5.,
+        )
+        .unwrap();
+
+        prob.add_constraint(vec![(x, -1.), (y, 1.), (w, -2.)], ConstraintOp::Gte, -3.)
+            .unwrap();
+
+        let solver = Solver::new();
+        let result = solver.solve(&prob).unwrap();
+
+        assert_unbounded(&result);
+    }
+
+    #[test]
+    fn small_prob_4() {
+        //NOTE: this problem has multiple optimal points, so we only test the objective value
+        let mut prob = Problem::new();
+
+        let x = prob
+            .add_var(-1., Bound::Lower(0.), Some("x".to_string()))
+            .unwrap();
+
+        let y = prob
+            .add_var(-1., Bound::Lower(0.), Some("y".to_string()))
+            .unwrap();
+
+        let z = prob
+            .add_var(-1., Bound::Lower(0.), Some("z".to_string()))
+            .unwrap();
+
+        prob.add_constraint(vec![(x, 1.), (y, -1.), (z, 1.)], ConstraintOp::Gte, -2.)
+            .unwrap();
+
+        prob.add_constraint(vec![(x, -1.), (y, 1.), (z, 1.)], ConstraintOp::Gte, -3.)
+            .unwrap();
+
+        prob.add_constraint(vec![(x, 1.), (y, 1.), (z, -1.)], ConstraintOp::Gte, -1.)
+            .unwrap();
+
+        prob.add_constraint(vec![(x, -1.), (y, -1.), (z, -1.)], ConstraintOp::Gte, -4.)
+            .unwrap();
+
+        let solver = Solver::new();
+        let result = solver.solve(&prob).unwrap();
+        assert_optimal_obj(&result, -4.);
+    }
+
+    #[test]
+    fn small_prob_5() {
+        //NOTE: this problem has multiple optimal points, so we only test the objective value
+        let mut prob = Problem::new();
+
+        let x = prob
+            .add_var(4., Bound::Lower(0.), Some("x".to_string()))
+            .unwrap();
+
+        let y = prob
+            .add_var(5., Bound::Lower(0.), Some("y".to_string()))
+            .unwrap();
+
+        prob.add_constraint(vec![(x, 1.), (y, 1.)], ConstraintOp::Gte, -1.)
+            .unwrap();
+
+        prob.add_constraint(vec![(x, 1.), (y, 2.)], ConstraintOp::Gte, 1.)
+            .unwrap();
+
+        prob.add_constraint(vec![(x, 4.), (y, 2.)], ConstraintOp::Gte, 8.)
+            .unwrap();
+
+        prob.add_constraint(vec![(x, -1.), (y, -1.)], ConstraintOp::Gte, -3.)
+            .unwrap();
+
+        prob.add_constraint(vec![(x, -1.), (y, 1.)], ConstraintOp::Gte, 1.)
+            .unwrap();
+
+        let solver = Solver::new();
+        let result = solver.solve(&prob).unwrap();
+        assert_optimal(&result, 14., &[1., 2.]);
+    }
+
+    #[test]
+    fn small_prob_6() {
+        //NOTE: this problem has multiple optimal points, so we only test the objective value
+        let mut prob = Problem::new();
+
+        let x = prob
+            .add_var(-2., Bound::Lower(0.), Some("x".to_string()))
+            .unwrap();
+
+        let y = prob
+            .add_var(-4., Bound::Lower(0.), Some("y".to_string()))
+            .unwrap();
+
+        let z = prob
+            .add_var(-1., Bound::Lower(0.), Some("z".to_string()))
+            .unwrap();
+
+        let w = prob
+            .add_var(-1., Bound::Lower(0.), Some("w".to_string()))
+            .unwrap();
+
+        prob.add_constraint(vec![(x, -1.), (y, -3.), (w, -1.)], ConstraintOp::Gte, -4.)
+            .unwrap();
+
+        prob.add_constraint(vec![(x, -2.), (y, -1.)], ConstraintOp::Gte, -3.)
+            .unwrap();
+
+        prob.add_constraint(vec![(y, -1.), (z, -4.), (w, -1.)], ConstraintOp::Gte, -3.)
+            .unwrap();
+
+        prob.add_constraint(vec![(x, 1.), (y, 1.), (z, 2.)], ConstraintOp::Gte, 1.)
+            .unwrap();
+
+        prob.add_constraint(vec![(x, -1.), (y, 1.), (z, 4.)], ConstraintOp::Gte, 1.)
+            .unwrap();
+
+        let solver = Solver::new();
+        let result = solver.solve(&prob).unwrap();
+        assert_optimal(&result, -6.5, &[1., 1., 0.5, 0.]);
     }
 }
