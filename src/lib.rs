@@ -640,4 +640,36 @@ mod tests {
         let result = solver.solve(&prob).unwrap();
         assert_optimal(&result, -1., &[1., 0., 1., 0.]);
     }
+
+    #[test]
+    fn small_prob_7() {
+        // setup_logger(log::LevelFilter::Trace);
+
+        let mut prob = Problem::new();
+
+        let x = prob
+            .add_var(2., Bound::Lower(0.), Some("x".to_string()))
+            .unwrap();
+
+        let y = prob
+            .add_var(-1., Bound::Lower(0.), Some("y".to_string()))
+            .unwrap();
+
+        let z = prob
+            .add_var(1., Bound::Free, Some("z".to_string()))
+            .unwrap();
+
+        prob.add_constraint(vec![(x, 1.), (y, -1.), (z, 4.)], ConstraintOp::Gte, -1.)
+            .unwrap();
+
+        prob.add_constraint(vec![(x, 1.), (y, -1.), (z, -1.)], ConstraintOp::Gte, 2.)
+            .unwrap();
+
+        prob.add_constraint(vec![(x, 1.), (y, 3.), (z, 2.)], ConstraintOp::Eq, 3.)
+            .unwrap();
+
+        let solver = Solver::new();
+        let result = solver.solve(&prob).unwrap();
+        assert_optimal(&result, 2.9, &[2.1, 0.7, -0.6]);
+    }
 }

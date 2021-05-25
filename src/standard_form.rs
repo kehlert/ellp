@@ -233,14 +233,11 @@ impl<'a> StandardForm<'a> {
             let b_tilde = &self.b - &self.A * &v;
             v = v.resize_vertically(n + m, 0.);
 
-            for i in 0..m {
-                v[n + i] = b_tilde[i].abs();
-            }
-
             self.A = self.A.resize_horizontally(n + rows.len(), 0.);
             let mut cur_col = self.A.ncols() - 1;
 
             for &i in rows.iter() {
+                v[cur_col] = b_tilde[i].abs();
                 self.A[(i, cur_col)] = b_tilde[i].signum();
                 B.push(Basic::new(cur_col));
                 cur_col -= 1;
