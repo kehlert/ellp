@@ -1,10 +1,18 @@
 use crate::error::EllPError;
 use crate::util::EPS;
 
+use std::collections::{HashMap, HashSet};
+
+const LTE_STR: &str = "\u{2264}";
+const EQ_STR: &str = "\u{003D}";
+const GTE_STR: &str = "\u{2265}";
+const INF_STR: &str = "\u{221E}";
+
 #[derive(Debug, Clone, Default)]
 pub struct Problem {
     variables: Vec<Variable>,
     constraints: Vec<Constraint>,
+    var_names: HashSet<String>, //these strings are duplicated in the variables
 }
 
 impl Problem {
@@ -39,7 +47,14 @@ impl Problem {
             return Err(EllPError::new(format!("invalid bound: {:?}", bound)));
         }
 
-        //TODO check that name is unique if it's provided
+        if let Some(name) = &name {
+            if !self.var_names.insert(name.clone()) {
+                return Err(EllPError::new(format!(
+                    "variable names must be unique, {} was added twice",
+                    name
+                )));
+            }
+        }
 
         let var = Variable::new(VariableId(self.variables.len()), obj_coeff, bound, name);
         self.variables.push(var);
@@ -170,6 +185,44 @@ pub enum Bound {
     Fixed(f64),
 }
 
+impl Bound {
+    fn display(&self, f: &mut std::fmt::Formatter, var: &Variable) -> std::fmt::Result {
+        match self {
+            Bound::Free => write!(
+                f,
+                "-{inf} {lte} {} {lte} {inf}",
+                var,
+                inf = INF_STR,
+                lte = LTE_STR
+            ),
+
+            Bound::Lower(lb) => write!(
+                f,
+                "{} {lte} {} {lte} {inf}",
+                lb,
+                var,
+                inf = INF_STR,
+                lte = LTE_STR
+            ),
+
+            Bound::Upper(ub) => write!(
+                f,
+                "-{inf} {lte} {} {lte} {}",
+                var,
+                ub,
+                inf = INF_STR,
+                lte = LTE_STR
+            ),
+
+            Bound::TwoSided(lb, ub) => {
+                write!(f, "{} {lte} {} {lte} {}", lb, var, ub, lte = LTE_STR)
+            }
+
+            Bound::Fixed(val) => write!(f, "{} {eq} {}", var, val, eq = LTE_STR),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Constraint {
     pub coeffs: Vec<(VariableId, f64)>,
@@ -191,6 +244,30 @@ impl Constraint {
             ConstraintOp::Eq => (lhs - self.rhs).abs() < EPS,
             ConstraintOp::Gte => lhs >= self.rhs - EPS,
         }
+    }
+
+    fn display(
+        &self,
+        f: &mut std::fmt::Formatter,
+        var_names: &HashMap<VariableId, &Variable>,
+    ) -> std::fmt::Result {
+        for (var_id, coeff) in &self.coeffs {
+            if *coeff == 0. {
+                continue;
+            }
+
+            let var = *var_names.get(&var_id).unwrap();
+
+            write!(
+                f,
+                "{} {}{} ",
+                if *coeff > 0. { "+" } else { "-" },
+                coeff.abs(),
+                var
+            )?;
+        }
+
+        write!(f, "{} {}", self.op, self.rhs)
     }
 }
 
@@ -214,6 +291,67 @@ pub enum ConstraintOp {
     Lte,
     Eq,
     Gte,
+}
+
+impl std::fmt::Display for Problem {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        writeln!(f, "minimize")?;
+        let mut var_id_to_var: HashMap<VariableId, &Variable> = HashMap::new();
+
+        for var in &self.variables {
+            let result = var_id_to_var.insert(var.id, &var);
+            assert!(result.is_none()); //should have have repeated ids
+
+            if var.obj_coeff == 0. {
+                continue;
+            }
+
+            write!(
+                f,
+                "{} {}{} ",
+                if var.obj_coeff > 0. { "+" } else { "-" },
+                var.obj_coeff.abs(),
+                var
+            )?;
+        }
+
+        writeln!(f, "\n\nsubject to")?;
+
+        for constraint in &self.constraints {
+            constraint.display(f, &var_id_to_var)?;
+            writeln!(f)?;
+        }
+
+        writeln!(f, "\nwith the bounds")?;
+
+        for var in &self.variables {
+            if !matches!(var.bound, Bound::Free) {
+                var.bound.display(f, var)?;
+                writeln!(f)?;
+            }
+        }
+
+        Ok(())
+    }
+}
+
+impl std::fmt::Display for Variable {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match &self.name {
+            Some(name) => write!(f, "{}", name),
+            None => write!(f, "id[{:?}]", self.id),
+        }
+    }
+}
+
+impl std::fmt::Display for ConstraintOp {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self {
+            ConstraintOp::Lte => write!(f, "{}", LTE_STR),
+            ConstraintOp::Eq => write!(f, "{}", EQ_STR),
+            ConstraintOp::Gte => write!(f, "{}", GTE_STR),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -261,5 +399,18 @@ mod tests {
         assert!(prob
             .add_constraint(vec![(VariableId(0), 1.)], Lte, 0.)
             .is_err());
+    }
+
+    #[test]
+    fn nonunique_var_names() {
+        let mut prob = Problem::new();
+        prob.add_var(0., Bound::Free, Some("x".to_string()))
+            .unwrap();
+
+        let is_err = prob
+            .add_var(0., Bound::Free, Some("x".to_string()))
+            .is_err();
+
+        assert!(is_err);
     }
 }
