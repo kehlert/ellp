@@ -1,7 +1,9 @@
 #![allow(non_snake_case)]
 
 use crate::problem::Bound;
-use crate::standard_form::{Basic, BasicFeasiblePoint, Nonbasic, NonbasicBound, StandardForm};
+use crate::standard_form::{
+    Basic, BasicFeasiblePoint, Nonbasic, NonbasicBound, StandardForm, StandardFormPhase1,
+};
 use crate::util::EPS;
 use crate::{error::EllPError, problem::Problem};
 
@@ -9,20 +11,37 @@ use log::{debug, trace};
 
 pub type EllPResult = Result<SolverResult, EllPError>;
 
-pub struct Solver {}
+pub struct SimplexSolver {
+    max_iter: u64,
+    dual: bool,
+}
 
-impl std::default::Default for Solver {
+impl std::default::Default for SimplexSolver {
     fn default() -> Self {
-        Self {}
+        Self {
+            max_iter: 1000,
+            dual: false,
+        }
     }
 }
 
-impl Solver {
-    pub fn new() -> Self {
-        Self {}
+impl SimplexSolver {
+    pub fn new(max_iter: Option<u64>, dual: bool) -> Self {
+        Self {
+            max_iter: max_iter.unwrap_or(u64::MAX),
+            dual,
+        }
     }
 
     pub fn solve(&self, prob: &Problem) -> EllPResult {
+        if !self.dual {
+            self.solve_primal(prob)
+        } else {
+            self.solve_dual(prob)
+        }
+    }
+
+    fn solve_primal(&self, prob: &Problem) -> EllPResult {
         let mut std_form: StandardForm = prob.into();
 
         debug!("finding an initial basic feasible point");
@@ -32,6 +51,12 @@ impl Solver {
                 debug!("found feasible point");
                 std_form = modified_std_form;
                 bfp
+            }
+
+            Phase1Result::MaxIter(bfp, phase_1_std_form) => {
+                debug!("phase 1 reached maximum iterations");
+                let obj = phase_1_std_form.obj(&bfp.x);
+                return Ok(SolverResult::MaxIter(Solution { obj, x: bfp.x }));
             }
 
             Phase1Result::Infeasible => return Ok(SolverResult::Infeasible),
@@ -49,9 +74,19 @@ impl Solver {
                     SolverResult::Optimal(Solution { obj, x })
                 }
 
+                StandardFormResult::MaxIter(bfp) => {
+                    let obj = std_form.obj(&bfp.x);
+                    let x = std_form.extract_solution(&bfp);
+                    SolverResult::MaxIter(Solution { obj, x })
+                }
+
                 StandardFormResult::Infeasible => SolverResult::Infeasible,
                 StandardFormResult::Unbounded => SolverResult::Unbounded,
             })
+    }
+
+    fn solve_dual(&self, prob: &Problem) -> EllPResult {
+        todo!()
     }
 
     fn solve_std_form(
@@ -138,8 +173,17 @@ impl Solver {
         let mut c_N =
             nalgebra::DVector::from_iterator(N.len(), N.iter().map(|i| std_form.c[i.index]));
 
+        let mut iter = 0u64;
+
         //TODO set max iterations for the solver
-        for _i in 0..8 {
+        loop {
+            if iter >= self.max_iter {
+                debug!("reached max iterations");
+                break Ok(StandardFormResult::MaxIter(BasicFeasiblePoint { x, B, N }));
+            }
+
+            iter += 1;
+
             //TODO check that objective is nonincreasing
             debug!("obj: {}", std_form.obj(&x));
 
@@ -216,8 +260,6 @@ impl Solver {
 
             //basic variable becomes nonbasic, and vice versa
         }
-
-        todo!()
     }
 
     fn find_feasible_point<'a>(
@@ -229,7 +271,9 @@ impl Solver {
         match self.solve_std_form(&std_form_phase_1.std_form, x0)? {
             StandardFormResult::Optimal(mut bfp) => {
                 let obj = std_form_phase_1.obj(&bfp.x);
+
                 assert!(obj > -EPS);
+
                 if obj < EPS {
                     let std_form = std_form_phase_1.phase_2(&mut bfp);
                     Ok(Phase1Result::Feasible(bfp, std_form))
@@ -238,6 +282,7 @@ impl Solver {
                 }
             }
 
+            StandardFormResult::MaxIter(bfp) => Ok(Phase1Result::MaxIter(bfp, std_form_phase_1)),
             StandardFormResult::Infeasible => Ok(Phase1Result::Infeasible),
             StandardFormResult::Unbounded => Err(EllPError::new(
                 "phase 1 problem is never unbounded".to_string(),
@@ -442,6 +487,7 @@ pub enum StandardFormResult {
     Optimal(BasicFeasiblePoint),
     Infeasible,
     Unbounded,
+    MaxIter(BasicFeasiblePoint),
 }
 
 #[derive(Debug)]
@@ -449,6 +495,7 @@ pub enum SolverResult {
     Optimal(Solution),
     Infeasible,
     Unbounded,
+    MaxIter(Solution),
 }
 
 #[derive(Debug)]
@@ -461,4 +508,5 @@ pub struct Solution {
 pub enum Phase1Result<'a> {
     Feasible(BasicFeasiblePoint, StandardForm<'a>),
     Infeasible,
+    MaxIter(BasicFeasiblePoint, StandardFormPhase1<'a>),
 }
