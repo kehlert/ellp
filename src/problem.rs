@@ -231,6 +231,10 @@ pub struct Constraint {
 }
 
 impl Constraint {
+    pub fn add_coeff(&mut self, var: VariableId, coeff: f64) {
+        self.coeffs.push((var, coeff));
+    }
+
     fn is_feasible(&self, x: &[f64]) -> bool {
         let mut lhs = 0.;
 

@@ -1,13 +1,16 @@
+mod dual;
 mod error;
+mod primal;
 pub mod problem;
 pub mod solver;
 mod standard_form;
 mod util;
 
 pub use crate::error::EllPError;
+pub use crate::primal::primal_simplex_solver::PrimalSimplexSolver;
 pub use crate::problem::{Bound, Constraint, ConstraintOp, Problem, Variable};
 pub use crate::solver::EllPResult;
-pub use crate::solver::{SimplexSolver, SolverResult};
+pub use crate::solver::SolverResult;
 
 #[cfg(test)]
 mod tests {
@@ -41,15 +44,17 @@ mod tests {
         match result {
             SolverResult::Optimal(sol) => {
                 assert!(
-                    (sol.obj - expected_obj).abs() < EPS,
+                    (sol.obj() - expected_obj).abs() < EPS,
                     "obj: {}, expected: {}",
-                    sol.obj,
+                    sol.obj(),
                     expected_obj
                 );
 
-                assert_eq!(sol.x.len(), expected_x.len());
+                let x = sol.x();
 
-                for (x1, x2) in sol.x.iter().zip(expected_x) {
+                assert_eq!(x.len(), expected_x.len());
+
+                for (x1, x2) in x.iter().zip(expected_x) {
                     assert!((x1 - x2).abs() < EPS, "x_i: {}, expected: {}", x1, x2);
                 }
             }
@@ -62,9 +67,9 @@ mod tests {
         match result {
             SolverResult::Optimal(sol) => {
                 assert!(
-                    (sol.obj - expected_obj).abs() < EPS,
+                    (sol.obj() - expected_obj).abs() < EPS,
                     "obj: {}, expected: {}",
-                    sol.obj,
+                    sol.obj(),
                     expected_obj
                 );
             }
@@ -90,8 +95,8 @@ mod tests {
     #[test]
     fn empty_problem() {
         let prob = Problem::new();
-        let solver = SimplexSolver::default();
-        let result = solver.solve(&prob).unwrap();
+        let solver = PrimalSimplexSolver::default();
+        let result = solver.solve(prob).unwrap();
         assert_optimal(&result, 0., &[])
     }
 
@@ -100,8 +105,8 @@ mod tests {
         let mut prob = Problem::new();
         prob.add_var(2., Bound::TwoSided(-1., 1.), Some("x1".to_string()))
             .unwrap();
-        let solver = SimplexSolver::default();
-        let result = solver.solve(&prob).unwrap();
+        let solver = PrimalSimplexSolver::default();
+        let result = solver.solve(prob).unwrap();
         assert_optimal(&result, -2., &[-1.])
     }
 
@@ -113,8 +118,8 @@ mod tests {
             .unwrap();
         prob.add_constraint(vec![(x1, 1.)], ConstraintOp::Gte, 1.)
             .unwrap();
-        let solver = SimplexSolver::default();
-        let result = solver.solve(&prob).unwrap();
+        let solver = PrimalSimplexSolver::default();
+        let result = solver.solve(prob).unwrap();
         assert_infeasible(&result)
     }
 
@@ -123,8 +128,8 @@ mod tests {
         let mut prob = Problem::new();
         prob.add_var(2., Bound::Upper(0.), Some("x1".to_string()))
             .unwrap();
-        let solver = SimplexSolver::default();
-        let result = solver.solve(&prob).unwrap();
+        let solver = PrimalSimplexSolver::default();
+        let result = solver.solve(prob).unwrap();
         assert_unbounded(&result)
     }
 
@@ -133,8 +138,8 @@ mod tests {
         let mut prob = Problem::new();
         prob.add_var(2., Bound::Free, Some("x1".to_string()))
             .unwrap();
-        let solver = SimplexSolver::default();
-        let result = solver.solve(&prob).unwrap();
+        let solver = PrimalSimplexSolver::default();
+        let result = solver.solve(prob).unwrap();
         assert_unbounded(&result)
     }
 
@@ -145,8 +150,8 @@ mod tests {
             .unwrap();
         prob.add_var(2., Bound::Upper(1.), Some("x2".to_string()))
             .unwrap();
-        let solver = SimplexSolver::default();
-        let result = solver.solve(&prob).unwrap();
+        let solver = PrimalSimplexSolver::default();
+        let result = solver.solve(prob).unwrap();
         assert_unbounded(&result)
     }
 
@@ -161,8 +166,8 @@ mod tests {
             .unwrap();
         prob.add_constraint(vec![(x1, 1.), (x2, 1.)], ConstraintOp::Lte, 0.)
             .unwrap();
-        let solver = SimplexSolver::default();
-        let result = solver.solve(&prob).unwrap();
+        let solver = PrimalSimplexSolver::default();
+        let result = solver.solve(prob).unwrap();
         assert_infeasible(&result)
     }
 
@@ -179,8 +184,8 @@ mod tests {
             .unwrap();
         prob.add_constraint(vec![(x1, 2.), (x2, 2.)], ConstraintOp::Eq, 1.)
             .unwrap();
-        let solver = SimplexSolver::default();
-        let result = solver.solve(&prob).unwrap();
+        let solver = PrimalSimplexSolver::default();
+        let result = solver.solve(prob).unwrap();
         assert_infeasible(&result)
     }
 
@@ -190,8 +195,8 @@ mod tests {
         prob.add_var(2., Bound::Free, Some("x1".to_string()))
             .unwrap();
         prob.add_constraint(vec![], ConstraintOp::Eq, 1.).unwrap();
-        let solver = SimplexSolver::default();
-        let result = solver.solve(&prob).unwrap();
+        let solver = PrimalSimplexSolver::default();
+        let result = solver.solve(prob).unwrap();
         assert_infeasible(&result)
     }
 
@@ -201,8 +206,8 @@ mod tests {
         prob.add_var(2., Bound::Lower(3.), Some("x1".to_string()))
             .unwrap();
         prob.add_constraint(vec![], ConstraintOp::Eq, 0.).unwrap();
-        let solver = SimplexSolver::default();
-        let result = solver.solve(&prob).unwrap();
+        let solver = PrimalSimplexSolver::default();
+        let result = solver.solve(prob).unwrap();
         assert_optimal(&result, 6., &[3.])
     }
 
@@ -210,8 +215,8 @@ mod tests {
     fn feasible_constraint_without_coeffs_and_no_vars() {
         let mut prob = Problem::new();
         prob.add_constraint(vec![], ConstraintOp::Eq, 0.).unwrap();
-        let solver = SimplexSolver::default();
-        let result = solver.solve(&prob).unwrap();
+        let solver = PrimalSimplexSolver::default();
+        let result = solver.solve(prob).unwrap();
         assert_optimal(&result, 0., &[])
     }
 
@@ -219,8 +224,8 @@ mod tests {
     fn infeasible_constraint_without_coeffs_and_no_vars() {
         let mut prob = Problem::new();
         prob.add_constraint(vec![], ConstraintOp::Eq, 1.).unwrap();
-        let solver = SimplexSolver::default();
-        let result = solver.solve(&prob).unwrap();
+        let solver = PrimalSimplexSolver::default();
+        let result = solver.solve(prob).unwrap();
         assert_infeasible(&result)
     }
 
@@ -242,8 +247,8 @@ mod tests {
         prob.add_constraint(vec![(x, 3.), (y, 1.)], ConstraintOp::Eq, 1.)
             .unwrap();
 
-        let solver = SimplexSolver::default();
-        let result = solver.solve(&prob).unwrap();
+        let solver = PrimalSimplexSolver::default();
+        let result = solver.solve(prob).unwrap();
 
         assert_optimal(&result, 0., &[0., 1.]);
     }
@@ -273,8 +278,8 @@ mod tests {
         prob.add_constraint(vec![(x, 5.), (y, 6.), (z, 13.)], ConstraintOp::Eq, 5.)
             .unwrap();
 
-        let solver = SimplexSolver::default();
-        let result = solver.solve(&prob).unwrap();
+        let solver = PrimalSimplexSolver::default();
+        let result = solver.solve(prob).unwrap();
 
         assert_optimal(&result, 0., &[0., -3.5, 2.]);
     }
@@ -304,8 +309,8 @@ mod tests {
         prob.add_constraint(vec![(x, 5.), (y, 6.), (z, 12.)], ConstraintOp::Eq, 5.)
             .unwrap();
 
-        let solver = SimplexSolver::default();
-        let result = solver.solve(&prob).unwrap();
+        let solver = PrimalSimplexSolver::default();
+        let result = solver.solve(prob).unwrap();
 
         assert_infeasible(&result);
     }
@@ -345,8 +350,8 @@ mod tests {
         prob.add_constraint(vec![(x3, -1.), (x4, -3.), (x5, -4.)], ConstraintOp::Eq, 2.)
             .unwrap();
 
-        let solver = SimplexSolver::default();
-        let result = solver.solve(&prob).unwrap();
+        let solver = PrimalSimplexSolver::default();
+        let result = solver.solve(prob).unwrap();
 
         assert_optimal(
             &result,
@@ -379,8 +384,8 @@ mod tests {
         prob.add_constraint(vec![(x, 3.), (y, 2.)], ConstraintOp::Lte, 22.)
             .unwrap();
 
-        let solver = SimplexSolver::default();
-        let result = solver.solve(&prob).unwrap();
+        let solver = PrimalSimplexSolver::default();
+        let result = solver.solve(prob).unwrap();
 
         assert_optimal(&result, -40., &[4., 5.]);
     }
@@ -413,8 +418,8 @@ mod tests {
         prob.add_constraint(vec![(x, -4.), (y, 1.)], ConstraintOp::Gte, -23.)
             .unwrap();
 
-        let solver = SimplexSolver::default();
-        let result = solver.solve(&prob).unwrap();
+        let solver = PrimalSimplexSolver::default();
+        let result = solver.solve(prob).unwrap();
 
         assert_optimal(&result, -15., &[3., 4.]);
     }
@@ -445,8 +450,8 @@ mod tests {
         prob.add_constraint(vec![(x, 1.), (y, -1.), (z, -2.)], ConstraintOp::Gte, -1.)
             .unwrap();
 
-        let solver = SimplexSolver::default();
-        let result = solver.solve(&prob).unwrap();
+        let solver = PrimalSimplexSolver::default();
+        let result = solver.solve(prob).unwrap();
 
         assert_unbounded(&result);
     }
@@ -485,8 +490,8 @@ mod tests {
         prob.add_constraint(vec![(x, -1.), (y, 1.), (w, -2.)], ConstraintOp::Gte, -3.)
             .unwrap();
 
-        let solver = SimplexSolver::default();
-        let result = solver.solve(&prob).unwrap();
+        let solver = PrimalSimplexSolver::default();
+        let result = solver.solve(prob).unwrap();
 
         assert_unbounded(&result);
     }
@@ -520,8 +525,8 @@ mod tests {
         prob.add_constraint(vec![(x, -1.), (y, -1.), (z, -1.)], ConstraintOp::Gte, -4.)
             .unwrap();
 
-        let solver = SimplexSolver::default();
-        let result = solver.solve(&prob).unwrap();
+        let solver = PrimalSimplexSolver::default();
+        let result = solver.solve(prob).unwrap();
         assert_optimal_obj(&result, -4.);
     }
 
@@ -552,8 +557,8 @@ mod tests {
         prob.add_constraint(vec![(x, -1.), (y, 1.)], ConstraintOp::Gte, 1.)
             .unwrap();
 
-        let solver = SimplexSolver::default();
-        let result = solver.solve(&prob).unwrap();
+        let solver = PrimalSimplexSolver::default();
+        let result = solver.solve(prob).unwrap();
         assert_optimal(&result, 14., &[1., 2.]);
     }
 
@@ -592,8 +597,8 @@ mod tests {
         prob.add_constraint(vec![(x, -1.), (y, 1.), (z, 4.)], ConstraintOp::Gte, 1.)
             .unwrap();
 
-        let solver = SimplexSolver::default();
-        let result = solver.solve(&prob).unwrap();
+        let solver = PrimalSimplexSolver::default();
+        let result = solver.solve(prob).unwrap();
         assert_optimal(&result, -6.5, &[1., 1., 0.5, 0.]);
     }
 
@@ -636,8 +641,8 @@ mod tests {
         prob.add_constraint(vec![(x, -1.)], ConstraintOp::Gte, -1.)
             .unwrap();
 
-        let solver = SimplexSolver::default();
-        let result = solver.solve(&prob).unwrap();
+        let solver = PrimalSimplexSolver::default();
+        let result = solver.solve(prob).unwrap();
         assert_optimal(&result, -1., &[1., 0., 1., 0.]);
     }
 
@@ -668,8 +673,8 @@ mod tests {
         prob.add_constraint(vec![(x, 1.), (y, 3.), (z, 2.)], ConstraintOp::Eq, 3.)
             .unwrap();
 
-        let solver = SimplexSolver::default();
-        let result = solver.solve(&prob).unwrap();
+        let solver = PrimalSimplexSolver::default();
+        let result = solver.solve(prob).unwrap();
         assert_optimal(&result, 2.9, &[2.1, 0.7, -0.6]);
     }
 }
