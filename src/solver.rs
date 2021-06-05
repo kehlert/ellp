@@ -1,6 +1,5 @@
-use crate::dual::dual_problem::{DualFeasible, DualPhase2};
+use crate::dual::dual_problem::DualPhase2;
 use crate::error::EllPError;
-use crate::primal::primal_problem::PrimalFeasible;
 use crate::problem::Constraint;
 use crate::standard_form::{BasicPoint, Point, StandardForm};
 
@@ -55,10 +54,6 @@ impl OptimalPoint {
         Self(point)
     }
 }
-
-impl PrimalFeasible for OptimalPoint {}
-
-impl DualFeasible for OptimalPoint {}
 
 impl BasicPoint for OptimalPoint {
     #[inline]

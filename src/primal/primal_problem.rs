@@ -7,8 +7,6 @@ use crate::util::EPS;
 
 use log::debug;
 
-pub trait PrimalFeasible: BasicPoint + std::convert::Into<PrimalFeasiblePoint> {}
-
 pub trait PrimalProblem {
     fn obj(&self) -> f64;
     fn std_form(&self) -> &StandardForm;
@@ -19,8 +17,6 @@ pub trait PrimalProblem {
 
 #[derive(Debug, Clone)]
 pub struct PrimalFeasiblePoint(Point);
-
-impl PrimalFeasible for PrimalFeasiblePoint {}
 
 impl BasicPoint for PrimalFeasiblePoint {
     #[inline]
@@ -283,13 +279,6 @@ impl std::convert::From<Problem> for PrimalPhase1 {
             feasible_point: PrimalFeasiblePoint(Point { x: v, N, B }),
         }
     }
-}
-
-#[derive(Debug)]
-pub enum PrimalPhase1Result {
-    Feasible,
-    Infeasible,
-    MaxIter,
 }
 
 impl std::convert::From<PrimalPhase1> for PrimalPhase2 {

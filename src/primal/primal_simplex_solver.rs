@@ -27,8 +27,6 @@ impl PrimalSimplexSolver {
         }
     }
 
-    //NOTE: initial point needs a standard form, and standard form contains the problem
-    //do not want to assume that the std_form below is the same one that the initial_point refers to
     pub fn solve(&self, prob: Problem) -> EllPResult {
         let mut phase_1: PrimalPhase1 = prob.into();
 
@@ -55,26 +53,6 @@ impl PrimalSimplexSolver {
         };
 
         debug!("initial basic feasible point:\n{:#?}", phase_2.pt());
-
-        /*
-        self.solve_std_form(&std_form, feasible_point)
-            .map(|result| match result {
-                StandardFormResult::Optimal(bfp) => {
-                    let obj = std_form.obj(&bfp.x);
-                    let x = std_form.extract_solution(&bfp);
-                    SolverResult::Optimal(Solution { obj, x })
-                }
-
-                StandardFormResult::MaxIter(bfp) => {
-                    let obj = std_form.obj(&bfp.x);
-                    let x = std_form.extract_solution(&bfp);
-                    SolverResult::MaxIter(Solution { obj, x })
-                }
-
-                StandardFormResult::Infeasible => SolverResult::Infeasible,
-                StandardFormResult::Unbounded => SolverResult::Unbounded,
-            })
-            */
 
         Ok(match self.solve_with_initial(&mut phase_2)? {
             SolutionStatus::Optimal => {

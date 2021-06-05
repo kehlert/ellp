@@ -6,17 +6,18 @@ pub mod solver;
 mod standard_form;
 mod util;
 
+pub use crate::dual::dual_simplex_solver::DualSimplexSolver;
 pub use crate::error::EllPError;
 pub use crate::primal::primal_simplex_solver::PrimalSimplexSolver;
 pub use crate::problem::{Bound, Constraint, ConstraintOp, Problem, Variable};
-pub use crate::solver::EllPResult;
-pub use crate::solver::SolverResult;
+pub use crate::solver::{EllPResult, SolverResult};
 
 #[cfg(test)]
 mod tests {
     use super::util::EPS;
     use super::*;
 
+    #[allow(dead_code)]
     fn setup_logger(log_level: log::LevelFilter) {
         use fern::colors::{Color, ColoredLevelConfig};
         let colors = ColoredLevelConfig::new()
@@ -358,8 +359,6 @@ mod tests {
             19.1578947368421,
             &[-0.94736842105, 2.105263157894, 0., 0., -0.5],
         )
-
-        //TODO test a system where free var constraints are infeasible
     }
 
     #[test]
@@ -676,5 +675,52 @@ mod tests {
         let solver = PrimalSimplexSolver::default();
         let result = solver.solve(prob).unwrap();
         assert_optimal(&result, 2.9, &[2.1, 0.7, -0.6]);
+    }
+
+    #[test]
+    fn small_prob_1_dual() {
+        //setup_logger(log::LevelFilter::Trace);
+
+        use crate::standard_form::StandardForm;
+
+        let mut prob = Problem::new();
+
+        let x1 = prob
+            .add_var(2., Bound::TwoSided(-1., 1.), Some("x1".to_string()))
+            .unwrap();
+
+        let x2 = prob
+            .add_var(10., Bound::Upper(6.), Some("x2".to_string()))
+            .unwrap();
+
+        let x3 = prob
+            .add_var(0., Bound::Lower(0.), Some("x3".to_string()))
+            .unwrap();
+
+        let x4 = prob
+            .add_var(1., Bound::Fixed(0.), Some("x4".to_string()))
+            .unwrap();
+
+        let x5 = prob
+            .add_var(0., Bound::Free, Some("x5".to_string()))
+            .unwrap();
+
+        prob.add_constraint(vec![(x1, 2.5), (x2, 2.5)], ConstraintOp::Gte, 5.)
+            .unwrap();
+
+        prob.add_constraint(vec![(x2, 2.5), (x1, 2.5)], ConstraintOp::Lte, 1.)
+            .unwrap();
+
+        prob.add_constraint(vec![(x3, -1.), (x4, -3.), (x5, -4.)], ConstraintOp::Eq, 2.)
+            .unwrap();
+
+        let solver = DualSimplexSolver::default();
+        let result = solver.solve(prob).unwrap();
+
+        // assert_optimal(
+        //     &result,
+        //     19.1578947368421,
+        //     &[-0.94736842105, 2.105263157894, 0., 0., -0.5],
+        // )
     }
 }

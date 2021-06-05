@@ -10,8 +10,8 @@ const INF_STR: &str = "\u{221E}";
 
 #[derive(Debug, Clone, Default)]
 pub struct Problem {
-    variables: Vec<Variable>,
-    constraints: Vec<Constraint>,
+    pub variables: Vec<Variable>,
+    pub constraints: Vec<Constraint>,
     var_names: HashSet<String>, //these strings are duplicated in the variables
 }
 
@@ -264,7 +264,7 @@ impl Constraint {
 
             write!(
                 f,
-                "{} {}{} ",
+                "{} {} {} ",
                 if *coeff > 0. { "+" } else { "-" },
                 coeff.abs(),
                 var
