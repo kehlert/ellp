@@ -16,10 +16,10 @@ pub trait DualProblem {
 
 #[derive(Debug, Clone)]
 pub struct DualFeasiblePoint {
-    y: nalgebra::DVector<f64>,
-    v: nalgebra::DVector<f64>,
-    w: nalgebra::DVector<f64>,
-    point: Point,
+    pub y: nalgebra::DVector<f64>,
+    pub v: nalgebra::DVector<f64>,
+    pub w: nalgebra::DVector<f64>,
+    pub point: Point,
 }
 
 impl BasicPoint for DualFeasiblePoint {
@@ -49,6 +49,32 @@ impl std::ops::DerefMut for DualFeasiblePoint {
 pub struct DualPhase1 {
     pub std_form: StandardForm,
     feasible_point: DualFeasiblePoint,
+}
+
+impl DualProblem for DualPhase1 {
+    fn obj(&self) -> f64 {
+        self.std_form.obj(&self.feasible_point.x)
+    }
+
+    #[inline]
+    fn std_form(&self) -> &StandardForm {
+        &self.std_form
+    }
+
+    #[inline]
+    fn pt(&self) -> &DualFeasiblePoint {
+        &self.feasible_point
+    }
+
+    #[inline]
+    fn pt_mut(&mut self) -> &mut DualFeasiblePoint {
+        &mut self.feasible_point
+    }
+
+    #[inline]
+    fn unpack(&mut self) -> (&StandardForm, &mut DualFeasiblePoint) {
+        (&self.std_form, &mut self.feasible_point)
+    }
 }
 
 #[derive(Debug)]
@@ -144,7 +170,7 @@ impl std::convert::From<Problem> for DualPhase1 {
         println!("A:{}", std_form.A);
 
         let y = A_B.transpose().lu().solve(&c_B).unwrap();
-        let d = &std_form.c - std_form.A.transpose() * &y;
+        let d = &std_form.c - std_form.A.tr_mul(&y);
 
         println!("y: {}", y);
         println!("d: {}", d);
@@ -194,7 +220,7 @@ impl std::convert::From<Problem> for DualPhase1 {
 
         let A_B_cols: Vec<_> = B.iter().map(|i| std_form.A.column(i.index)).collect();
         let A_B = nalgebra::DMatrix::from_columns(&A_B_cols);
-        println!("A_B_T y:{}", A_B.transpose() * &y);
+        println!("A_B_T y:{}", A_B.tr_mul(&y));
         println!("c_B: {}", c_B);
 
         let feasible_point = DualFeasiblePoint {

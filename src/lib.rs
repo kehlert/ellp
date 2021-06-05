@@ -679,9 +679,7 @@ mod tests {
 
     #[test]
     fn small_prob_1_dual() {
-        //setup_logger(log::LevelFilter::Trace);
-
-        use crate::standard_form::StandardForm;
+        setup_logger(log::LevelFilter::Trace);
 
         let mut prob = Problem::new();
 
@@ -714,7 +712,7 @@ mod tests {
         prob.add_constraint(vec![(x3, -1.), (x4, -3.), (x5, -4.)], ConstraintOp::Eq, 2.)
             .unwrap();
 
-        let solver = DualSimplexSolver::default();
+        let solver = DualSimplexSolver::new(Some(1));
         let result = solver.solve(prob).unwrap();
 
         // assert_optimal(

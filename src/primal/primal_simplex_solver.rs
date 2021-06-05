@@ -71,7 +71,11 @@ impl PrimalSimplexSolver {
         prob: &mut P,
     ) -> Result<SolutionStatus, EllPError> {
         let (std_form, pt) = prob.unpack();
-        let (x, N, B) = pt.unpack();
+
+        let pt = &mut **pt;
+        let x = &mut pt.x;
+        let N = &mut pt.N;
+        let B = &mut pt.B;
 
         trace!("c: {}", std_form.c);
         trace!("A: {}", std_form.A);
@@ -152,7 +156,7 @@ impl PrimalSimplexSolver {
         loop {
             if iter >= self.max_iter {
                 debug!("reached max iterations");
-                break Ok(SolutionStatus::MaxIter);
+                return Ok(SolutionStatus::MaxIter);
             }
 
             iter += 1;
@@ -169,24 +173,15 @@ impl PrimalSimplexSolver {
                 ));
             }
 
-            //should always have a solution\
+            //should always have a solution
             //(perhaps add solve_transpose to lu decomp? or .transpose() to lu_decomp?)
             //would be a good contribution to nalgebra
-            let u_tilde = lu_decomp
-                .u()
-                .transpose()
-                .solve_lower_triangular(&c_B)
-                .unwrap();
-
-            let mut u = lu_decomp
-                .l()
-                .transpose()
-                .solve_upper_triangular(&u_tilde)
-                .unwrap();
+            let u_tilde = lu_decomp.u().tr_solve_upper_triangular(&c_B).unwrap();
+            let mut u = lu_decomp.l().tr_solve_lower_triangular(&u_tilde).unwrap();
 
             lu_decomp.p().inv_permute_rows(&mut u);
 
-            let r = &c_N - A_N.transpose() * u;
+            let r = &c_N - A_N.tr_mul(&u);
 
             let pivot_result = Self::pivot(&lu_decomp, &r, std_form, x, N, B);
 

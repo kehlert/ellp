@@ -15,18 +15,6 @@ pub struct Point {
     pub B: Vec<Basic>,
 }
 
-impl Point {
-    pub fn unpack(
-        &mut self,
-    ) -> (
-        &mut nalgebra::DVector<f64>,
-        &mut Vec<Nonbasic>,
-        &mut Vec<Basic>,
-    ) {
-        (&mut self.x, &mut self.N, &mut self.B)
-    }
-}
-
 #[derive(Debug, Clone)]
 pub struct StandardForm {
     pub c: nalgebra::DVector<f64>,
@@ -50,6 +38,30 @@ impl StandardForm {
     #[inline]
     pub fn obj(&self, x: &nalgebra::DVector<f64>) -> f64 {
         self.c.dot(x)
+    }
+
+    pub fn dual_obj(
+        &self,
+        y: &nalgebra::DVector<f64>,
+        v: &nalgebra::DVector<f64>,
+        w: &nalgebra::DVector<f64>,
+    ) -> f64 {
+        assert!(v.len() == self.bounds.len());
+        assert!(w.len() == self.bounds.len());
+
+        let mut obj = self.b.dot(y);
+
+        for (i, bound) in self.bounds.iter().enumerate() {
+            match bound {
+                Bound::Free => (),
+                Bound::Lower(lb) => obj += lb * v[i],
+                Bound::Upper(ub) => obj += ub * w[i],
+                Bound::TwoSided(lb, ub) => obj += lb * v[i] + ub * w[i],
+                Bound::Fixed(val) => obj += val * (v[i] + w[i]),
+            }
+        }
+
+        obj
     }
 
     #[inline]
