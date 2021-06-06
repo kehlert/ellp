@@ -1,10 +1,12 @@
-use std::ops::{AddAssign, DerefMut};
+#![allow(non_snake_case)]
 
-use super::dual_problem::{DualFeasiblePoint, DualPhase1, DualPhase2, DualProblem};
+use std::ops::AddAssign;
+
+use super::dual_problem::{DualPhase1, DualPhase2, DualProblem};
 use crate::error::EllPError;
 use crate::problem::{Bound, Problem};
-use crate::solver::{EllPResult, SolutionStatus};
-use crate::standard_form::{Nonbasic, NonbasicBound};
+use crate::solver::{EllPResult, OptimalPoint, Solution, SolutionStatus, SolverResult};
+use crate::standard_form::{BasicPoint, Nonbasic, NonbasicBound};
 use crate::util::EPS;
 
 use log::debug;
@@ -29,10 +31,50 @@ impl DualSimplexSolver {
     pub fn solve(&self, prob: Problem) -> EllPResult {
         let mut phase_1: DualPhase1 = prob.into();
         println!("\n---------------------------\nPHASE 1\n---------------------------\n");
-        self.solve_with_initial(&mut phase_1)?;
+
+        let mut phase_2: DualPhase2 = match self.solve_with_initial(&mut phase_1)? {
+            SolutionStatus::Optimal => {
+                let obj = phase_1.obj();
+
+                assert!(obj > -EPS);
+
+                if obj < EPS {
+                    debug!("found feasible point");
+                    phase_1.into()
+                } else {
+                    todo!("is primal problem unbounded or infeasible? run primal phase 1")
+                }
+            }
+
+            SolutionStatus::Infeasible => {
+                todo!("is primal problem unbounded or infeasible? run primal phase 1")
+            }
+
+            SolutionStatus::Unbounded => return Ok(SolverResult::Infeasible),
+
+            SolutionStatus::MaxIter => {
+                debug!("phase 1 reached maximum iterations");
+                return Ok(SolverResult::MaxIter { obj: f64::INFINITY });
+            }
+        };
+
+        debug!("initial dual feasible point:\n{:#?}", phase_2.pt());
 
         println!("\n---------------------------\nPHASE 2\n---------------------------\n");
-        todo!()
+
+        Ok(match self.solve_with_initial(&mut phase_2)? {
+            SolutionStatus::Optimal => {
+                let opt_pt = OptimalPoint::new(phase_2.point.into_pt());
+                SolverResult::Optimal(Solution::new(phase_2.std_form, opt_pt))
+            }
+
+            SolutionStatus::Infeasible => {
+                todo!("is primal problem unbounded or infeasible? run primal phase 1")
+            }
+
+            SolutionStatus::Unbounded => SolverResult::Unbounded,
+            SolutionStatus::MaxIter => SolverResult::MaxIter { obj: phase_2.obj() },
+        })
     }
 
     pub fn solve_with_initial<P: DualProblem>(

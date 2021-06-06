@@ -46,12 +46,12 @@ impl std::ops::DerefMut for DualFeasiblePoint {
 #[derive(Debug)]
 pub struct DualPhase1 {
     pub std_form: StandardForm,
-    feasible_point: DualFeasiblePoint,
+    pub point: DualFeasiblePoint,
 }
 
 impl DualProblem for DualPhase1 {
     fn obj(&self) -> f64 {
-        self.std_form.obj(&self.feasible_point.x)
+        self.std_form.obj(&self.point.x)
     }
 
     #[inline]
@@ -61,28 +61,54 @@ impl DualProblem for DualPhase1 {
 
     #[inline]
     fn pt(&self) -> &DualFeasiblePoint {
-        &self.feasible_point
+        &self.point
     }
 
     #[inline]
     fn pt_mut(&mut self) -> &mut DualFeasiblePoint {
-        &mut self.feasible_point
+        &mut self.point
     }
 
     #[inline]
     fn unpack(&mut self) -> (&StandardForm, &mut DualFeasiblePoint) {
-        (&self.std_form, &mut self.feasible_point)
+        (&self.std_form, &mut self.point)
     }
 }
 
 #[derive(Debug)]
 pub struct DualPhase2 {
-    std_form: StandardForm,
-    feasible_point: DualFeasiblePoint,
+    pub std_form: StandardForm,
+    pub point: DualFeasiblePoint,
+}
+
+impl DualProblem for DualPhase2 {
+    fn obj(&self) -> f64 {
+        self.std_form.obj(&self.point.x)
+    }
+
+    #[inline]
+    fn std_form(&self) -> &StandardForm {
+        &self.std_form
+    }
+
+    #[inline]
+    fn pt(&self) -> &DualFeasiblePoint {
+        &self.point
+    }
+
+    #[inline]
+    fn pt_mut(&mut self) -> &mut DualFeasiblePoint {
+        &mut self.point
+    }
+
+    #[inline]
+    fn unpack(&mut self) -> (&StandardForm, &mut DualFeasiblePoint) {
+        (&self.std_form, &mut self.point)
+    }
 }
 
 impl std::convert::From<Problem> for DualPhase1 {
-    fn from(mut prob: Problem) -> Self {
+    fn from(prob: Problem) -> Self {
         let mut phase_1_prob = Problem::new();
         let mut old_to_new_var_ids = HashMap::new();
         // let mut std_form: StandardForm = prob.into();
@@ -218,15 +244,12 @@ impl std::convert::From<Problem> for DualPhase1 {
         println!("A_B_T y:{}", A_B.tr_mul(&y));
         println!("c_B: {}", c_B);
 
-        let feasible_point = DualFeasiblePoint {
+        let point = DualFeasiblePoint {
             y,
             point: Point { x, N, B },
         };
 
-        DualPhase1 {
-            std_form,
-            feasible_point,
-        }
+        DualPhase1 { std_form, point }
     }
 }
 
