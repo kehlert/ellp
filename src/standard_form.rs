@@ -40,24 +40,18 @@ impl StandardForm {
         self.c.dot(x)
     }
 
-    pub fn dual_obj(
-        &self,
-        y: &nalgebra::DVector<f64>,
-        v: &nalgebra::DVector<f64>,
-        w: &nalgebra::DVector<f64>,
-    ) -> f64 {
-        assert!(v.len() == self.bounds.len());
-        assert!(w.len() == self.bounds.len());
+    pub fn dual_obj(&self, y: &nalgebra::DVector<f64>, d: &nalgebra::DVector<f64>) -> f64 {
+        assert!(d.len() == self.bounds.len());
 
         let mut obj = self.b.dot(y);
 
         for (i, bound) in self.bounds.iter().enumerate() {
             match bound {
                 Bound::Free => (),
-                Bound::Lower(lb) => obj += lb * v[i],
-                Bound::Upper(ub) => obj += ub * w[i],
-                Bound::TwoSided(lb, ub) => obj += lb * v[i] + ub * w[i],
-                Bound::Fixed(val) => obj += val * (v[i] + w[i]),
+                Bound::Lower(lb) => obj += lb * d[i],
+                Bound::Upper(ub) => obj += ub * d[i],
+                Bound::TwoSided(lb, ub) => obj += if d[i] > 0. { lb * d[i] } else { ub * d[i] },
+                Bound::Fixed(val) => obj += val * d[i],
             }
         }
 

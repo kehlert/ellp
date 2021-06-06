@@ -712,7 +712,7 @@ mod tests {
         prob.add_constraint(vec![(x3, -1.), (x4, -3.), (x5, -4.)], ConstraintOp::Eq, 2.)
             .unwrap();
 
-        let solver = DualSimplexSolver::new(Some(1));
+        let solver = DualSimplexSolver::new(Some(2));
         let result = solver.solve(prob).unwrap();
 
         // assert_optimal(

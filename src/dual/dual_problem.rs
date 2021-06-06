@@ -17,8 +17,6 @@ pub trait DualProblem {
 #[derive(Debug, Clone)]
 pub struct DualFeasiblePoint {
     pub y: nalgebra::DVector<f64>,
-    pub v: nalgebra::DVector<f64>,
-    pub w: nalgebra::DVector<f64>,
     pub point: Point,
 }
 
@@ -165,9 +163,10 @@ impl std::convert::From<Problem> for DualPhase1 {
         let A_B_cols: Vec<_> = B.iter().map(|i| std_form.A.column(i.index)).collect();
         let A_B = nalgebra::DMatrix::from_columns(&A_B_cols);
 
+        println!("c:{}", std_form.c);
+        println!("A:{}", std_form.A);
         println!("A_B:{}", A_B);
         println!("B:{:?}", B);
-        println!("A:{}", std_form.A);
 
         let y = A_B.transpose().lu().solve(&c_B).unwrap();
         let d = &std_form.c - std_form.A.tr_mul(&y);
@@ -177,9 +176,6 @@ impl std::convert::From<Problem> for DualPhase1 {
 
         let mut x = nalgebra::DVector::zeros(std_form.bounds.len());
 
-        let mut v = nalgebra::DVector::zeros(std_form.bounds.len());
-        let mut w = nalgebra::DVector::zeros(std_form.bounds.len());
-
         assert!(d.len() == std_form.bounds.len());
 
         let mut N = Vec::with_capacity(N_indices.len());
@@ -188,17 +184,17 @@ impl std::convert::From<Problem> for DualPhase1 {
             if let Bound::TwoSided(lb, ub) = std_form.bounds[i] {
                 if d[i] >= 0. {
                     x[i] = lb;
-                    v[i] = d[i];
                     N.push(Nonbasic::new(i, NonbasicBound::Lower))
                 } else {
                     x[i] = ub;
-                    w[i] = d[i];
                     N.push(Nonbasic::new(i, NonbasicBound::Upper))
                 }
             } else {
                 panic!("bounds should always be two-sided");
             }
         }
+
+        println!("N:{:?}", N);
 
         //assumes that, at this point, the elements of x correspond to x_B are 0
         let b_tilde = &std_form.b - &std_form.A * &x;
@@ -213,8 +209,7 @@ impl std::convert::From<Problem> for DualPhase1 {
         println!("{:?}", std_form.bounds);
         println!("y: {}", y);
         println!("x: {}", x);
-        println!("v: {}", v);
-        println!("w: {}", w);
+        println!("d: {}", d);
         println!("Ax:{}", &std_form.A * &x);
         println!("b:{}", std_form.b);
 
@@ -225,8 +220,6 @@ impl std::convert::From<Problem> for DualPhase1 {
 
         let feasible_point = DualFeasiblePoint {
             y,
-            v,
-            w,
             point: Point { x, N, B },
         };
 

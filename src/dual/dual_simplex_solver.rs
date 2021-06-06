@@ -28,7 +28,10 @@ impl DualSimplexSolver {
 
     pub fn solve(&self, prob: Problem) -> EllPResult {
         let mut phase_1: DualPhase1 = prob.into();
+        println!("\n---------------------------\nPHASE 1\n---------------------------\n");
         self.solve_with_initial(&mut phase_1)?;
+
+        println!("\n---------------------------\nPHASE 2\n---------------------------\n");
         todo!()
     }
 
@@ -41,8 +44,6 @@ impl DualSimplexSolver {
         // let (x, N, B) = pt.unpack();
 
         let y = &mut pt.y;
-        let w = &mut pt.w;
-        let v = &mut pt.v;
 
         let pt = &mut pt.point;
         let x = &mut pt.x;
@@ -103,28 +104,30 @@ impl DualSimplexSolver {
             )));
         }
 
-        let B_cols: Vec<_> = B.iter().map(|i| std_form.A.column(i.index)).collect();
-        let mut A_B = nalgebra::DMatrix::from_columns(&B_cols);
+        let mut A_B = std_form.A.select_columns(B.iter().map(|b| &b.index));
         let mut c_B =
             nalgebra::DVector::from_iterator(B.len(), B.iter().map(|i| std_form.c[i.index]));
 
-        let N_cols: Vec<_> = N.iter().map(|i| std_form.A.column(i.index)).collect();
-
-        if N_cols.is_empty() {
+        if N.is_empty() {
             return Ok(SolutionStatus::Optimal);
         }
 
-        let mut A_N = nalgebra::DMatrix::from_columns(&N_cols);
+        let mut A_N = std_form.A.select_columns(N.iter().map(|n| &n.index));
         let mut c_N =
             nalgebra::DVector::from_iterator(N.len(), N.iter().map(|i| std_form.c[i.index]));
+
+        println!("A_N:{}", A_N);
 
         let mut d = &std_form.c - std_form.A.tr_mul(y);
 
         let mut iter = 0u64;
+        let mut obj = std_form.dual_obj(y, &d);
 
         let mut zero_vector = nalgebra::DVector::zeros(std_form.rows());
 
         loop {
+            println!("ITER: {}", iter);
+
             if iter >= self.max_iter {
                 debug!("reached max iterations");
                 return Ok(SolutionStatus::MaxIter);
@@ -134,24 +137,24 @@ impl DualSimplexSolver {
 
             //TODO check that objective is nondecreasing
             //could do an online update of the objective
-            debug!("obj: {}", std_form.dual_obj(y, v, w));
+            debug!("obj: {}", obj);
 
             let leaving = B.iter().enumerate().find_map(|(i, B_i)| {
                 let x_i = x[B_i.index];
 
-                let delta = match std_form.bounds[B_i.index] {
+                let bound_change = match std_form.bounds[B_i.index] {
                     Bound::Free => None,
 
                     Bound::Lower(lb) => {
                         if x_i < lb {
-                            Some(x_i - lb)
+                            Some((x_i - lb, NonbasicBound::Lower))
                         } else {
                             None
                         }
                     }
                     Bound::Upper(ub) => {
                         if x_i > ub {
-                            Some(x_i - ub)
+                            Some((x_i - ub, NonbasicBound::Upper))
                         } else {
                             None
                         }
@@ -159,24 +162,18 @@ impl DualSimplexSolver {
 
                     Bound::TwoSided(lb, ub) => {
                         if x_i > ub {
-                            Some(x_i - ub)
+                            Some((x_i - ub, NonbasicBound::Upper))
                         } else if x_i < lb {
-                            Some(x_i - lb)
+                            Some((x_i - lb, NonbasicBound::Lower))
                         } else {
                             None
                         }
                     }
 
-                    Bound::Fixed(val) => {
-                        if (x_i - val).abs() > EPS {
-                            Some(x_i - val)
-                        } else {
-                            None
-                        }
-                    }
+                    Bound::Fixed(val) => None,
                 };
 
-                delta.map(|d| (i, d))
+                bound_change.map(|(delta, nonbasic_bound)| (i, delta, nonbasic_bound))
             });
 
             debug!("leaving variable: {:?}", leaving);
@@ -184,8 +181,8 @@ impl DualSimplexSolver {
             //TODO avoid the clone and update LU decomp instead
             let lu = A_B.clone().lu();
 
-            let (leaving_index, delta) = match leaving {
-                Some((i, delta)) => (i, delta),
+            let (leaving_index, delta, nonbasic_bound) = match leaving {
+                Some(inner) => inner,
                 None => return Ok(SolutionStatus::Optimal),
             };
 
@@ -198,11 +195,12 @@ impl DualSimplexSolver {
             debug!("rho:{}", rho);
 
             let mut alpha = A_N.tr_mul(&rho);
-            debug!("alpha:{}", alpha);
 
             if delta < 0. {
                 alpha.neg_mut();
             }
+
+            debug!("alpha:{}", alpha);
 
             assert!(alpha.len() == N.len());
 
@@ -237,7 +235,8 @@ impl DualSimplexSolver {
             let leaving = &B[leaving_index];
             let entering = &N[entering_index];
 
-            debug!("entering: {:?}", N[entering_index]);
+            debug!("leaving: {:?}", leaving);
+            debug!("entering: {:?}", entering);
 
             let alpha_q = lu.solve(&std_form.A.column(entering.index)).unwrap();
 
@@ -251,30 +250,50 @@ impl DualSimplexSolver {
 
             d[entering_index] = 0.;
 
+            y.add_assign(theta_dual * &rho);
+
             let theta_primal = delta / alpha_q[leaving_index];
 
             assert!(alpha_q.len() == B.len());
 
             for (i, b) in B.iter().enumerate() {
+                println!(
+                    "x[{}]={}, {}, {}",
+                    b.index, x[b.index], theta_primal, alpha_q[i]
+                );
                 x[b.index] -= theta_primal * alpha_q[i];
+                println!("after: {}", x[b.index]);
             }
 
             x[entering.index] += theta_primal;
 
-            //TODO update basics and nonbasics, including A_N, c_N, etc.
+            obj += theta_dual * delta;
 
-            debug!("delta: {}, theta_dual: {}", delta, theta_dual);
+            debug!("delta: {}", delta);
+            debug!("theta_dual: {}", theta_dual);
+            debug!("theta_primal: {}", theta_primal);
 
-            debug!(
-                "obj after: {}",
-                std_form.dual_obj(y, v, w) + theta_dual * delta
-            );
+            debug!("obj after: {}", obj);
+
+            debug!("obj after2: {}", std_form.dual_obj(y, &d));
 
             debug!("x after: {}", x);
 
-            todo!()
-        }
+            std::mem::swap(&mut B[leaving_index].index, &mut N[entering_index].index);
+            N[entering_index].bound = nonbasic_bound;
 
-        todo!()
+            for (x, y) in A_B
+                .column_mut(leaving_index)
+                .iter_mut()
+                .zip(A_N.column_mut(entering_index).iter_mut())
+            {
+                std::mem::swap(x, y);
+            }
+
+            std::mem::swap(&mut c_B[leaving_index], &mut c_N[leaving_index]);
+
+            debug!("B after: {:?}", B);
+            debug!("N after: {:?}", N);
+        }
     }
 }
