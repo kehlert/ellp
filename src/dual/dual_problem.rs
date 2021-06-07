@@ -1,10 +1,10 @@
 #![allow(non_snake_case)]
 
-use crate::problem::{Bound, ConstraintOp, Problem};
+use crate::problem::{Bound, ConstraintOp, Problem, VariableId};
 use crate::standard_form::{Basic, BasicPoint, Nonbasic, NonbasicBound, Point, StandardForm};
 use crate::util::EPS;
 
-use std::collections::HashMap;
+use std::collections::HashSet;
 
 pub trait DualProblem {
     fn obj(&self) -> f64;
@@ -47,6 +47,7 @@ impl std::ops::DerefMut for DualFeasiblePoint {
 pub struct DualPhase1 {
     pub std_form: StandardForm,
     pub point: DualFeasiblePoint,
+    orig_std_form: StandardForm,
 }
 
 impl DualProblem for DualPhase1 {
@@ -109,51 +110,41 @@ impl DualProblem for DualPhase2 {
 
 impl std::convert::From<Problem> for DualPhase1 {
     fn from(prob: Problem) -> Self {
-        let mut phase_1_prob = Problem::new();
-        let mut old_to_new_var_ids = HashMap::new();
-        // let mut std_form: StandardForm = prob.into();
+        println!("orig prob:\n{}", prob);
 
-        for var in prob.variables {
-            if let Some(bound) = match &var.bound {
+        let orig_std_form: StandardForm = prob.into();
+        let mut phase_1_prob = Problem::new();
+        let mut vars_kept = HashSet::new();
+
+        for i in 0..orig_std_form.cols() {
+            if let Some(bound) = match &orig_std_form.bounds[i] {
                 Bound::Free => Some(Bound::TwoSided(-1., 1.)),
                 Bound::Lower(..) => Some(Bound::TwoSided(0., 1.)),
                 Bound::Upper(..) => Some(Bound::TwoSided(-1., 0.)),
                 Bound::TwoSided(..) => None,
                 Bound::Fixed(..) => None,
             } {
-                let new_var_id = phase_1_prob
-                    .add_var(var.obj_coeff, bound, var.name)
+                vars_kept.insert(i);
+                phase_1_prob
+                    .add_var_with_id(orig_std_form.c[i], bound, i.into(), None)
                     .unwrap();
-
-                old_to_new_var_ids.insert(var.id, new_var_id);
             }
         }
 
-        println!("kept var ids: {:?}", old_to_new_var_ids);
-
-        for constraint in prob.constraints {
-            println!("{:?}", constraint);
-
-            let mut coeffs: Vec<_> = constraint
-                .coeffs
-                .into_iter()
-                .filter_map(|(var_id, coeff)| old_to_new_var_ids.get(&var_id).map(|c| (*c, coeff)))
+        for i in 0..orig_std_form.rows() {
+            let coeffs: Vec<_> = orig_std_form
+                .A
+                .row(i)
+                .iter()
+                .enumerate()
+                .filter_map(|(col_index, &coeff)| {
+                    if vars_kept.contains(&col_index) {
+                        Some((col_index.into(), coeff))
+                    } else {
+                        None
+                    }
+                })
                 .collect();
-
-            println!("{:?}\n", coeffs);
-
-            if let Some(slack_coeff) = match constraint.op {
-                ConstraintOp::Lte => Some(1.),
-                ConstraintOp::Eq => None,
-                ConstraintOp::Gte => Some(-1.),
-            } {
-                //slack vars always have a bound of [0, infty)
-                let slack_var = phase_1_prob
-                    .add_var(0., Bound::TwoSided(0., 1.), None)
-                    .unwrap();
-
-                coeffs.push((slack_var, slack_coeff));
-            }
 
             phase_1_prob
                 .add_constraint(coeffs, ConstraintOp::Eq, 0.)
@@ -180,21 +171,24 @@ impl std::convert::From<Problem> for DualPhase1 {
             .map(|i| Basic::new(perm_cols[i]))
             .collect();
 
-        let N_indices: Vec<_> = (std_form.A.nrows()..perm_cols.len())
-            .map(|i| perm_cols[i])
+        let mut N: Vec<_> = (std_form.A.nrows()..perm_cols.len())
+            .map(|i| Nonbasic::new(perm_cols[i], NonbasicBound::Lower))
             .collect();
 
         //would be good to avoid creating this vector
         let c_B = nalgebra::DVector::from_iterator(B.len(), B.iter().map(|i| std_form.c[i.index]));
-        let A_B_cols: Vec<_> = B.iter().map(|i| std_form.A.column(i.index)).collect();
-        let A_B = nalgebra::DMatrix::from_columns(&A_B_cols);
+        let A_B = std_form.A.select_columns(B.iter().map(|b| &b.index));
 
         println!("c:{}", std_form.c);
         println!("A:{}", std_form.A);
         println!("A_B:{}", A_B);
         println!("B:{:?}", B);
 
-        let y = A_B.transpose().lu().solve(&c_B).unwrap();
+        let A_B_lu = A_B.lu();
+        let y_tilde = A_B_lu.u().tr_solve_upper_triangular(&c_B).unwrap();
+        let mut y = A_B_lu.l().tr_solve_lower_triangular(&y_tilde).unwrap();
+        A_B_lu.p().inv_permute_rows(&mut y);
+
         let d = &std_form.c - std_form.A.tr_mul(&y);
 
         println!("y: {}", y);
@@ -204,16 +198,16 @@ impl std::convert::From<Problem> for DualPhase1 {
 
         assert!(d.len() == std_form.bounds.len());
 
-        let mut N = Vec::with_capacity(N_indices.len());
+        for n in &mut N {
+            let i = n.index;
 
-        for &i in &N_indices {
             if let Bound::TwoSided(lb, ub) = std_form.bounds[i] {
                 if d[i] >= 0. {
                     x[i] = lb;
-                    N.push(Nonbasic::new(i, NonbasicBound::Lower))
+                    n.bound = NonbasicBound::Lower;
                 } else {
                     x[i] = ub;
-                    N.push(Nonbasic::new(i, NonbasicBound::Upper))
+                    n.bound = NonbasicBound::Upper;
                 }
             } else {
                 panic!("bounds should always be two-sided");
@@ -224,7 +218,7 @@ impl std::convert::From<Problem> for DualPhase1 {
 
         //assumes that, at this point, the elements of x correspond to x_B are 0
         let b_tilde = &std_form.b - &std_form.A * &x;
-        let x_B = A_B.lu().solve(&b_tilde).unwrap();
+        let x_B = A_B_lu.solve(&b_tilde).unwrap();
 
         assert!(x_B.len() == B.len());
 
@@ -249,12 +243,110 @@ impl std::convert::From<Problem> for DualPhase1 {
             point: Point { x, N, B },
         };
 
-        DualPhase1 { std_form, point }
+        DualPhase1 {
+            std_form,
+            point,
+            orig_std_form,
+        }
     }
 }
 
 impl std::convert::From<DualPhase1> for DualPhase2 {
-    fn from(mut _phase_1: DualPhase1) -> Self {
-        todo!()
+    fn from(phase_1: DualPhase1) -> Self {
+        let phase_1_prob = phase_1.std_form.prob;
+        let std_form = phase_1.orig_std_form;
+        let mut is_basic = vec![false; std_form.cols()];
+
+        let B: Vec<_> = phase_1
+            .point
+            .B
+            .iter()
+            .map(|b| {
+                let index = phase_1_prob.variables[b.index].id.into();
+                is_basic[index] = true;
+                Basic::new(index)
+            })
+            .collect();
+
+        let d = &std_form.c - std_form.A.tr_mul(&phase_1.point.y);
+        println!("d: {}", d);
+
+        let (x_N, N): (Vec<_>, Vec<_>) = is_basic
+            .iter()
+            .enumerate()
+            .filter_map(|(i, b)| {
+                if !b {
+                    let d_i = d[i];
+
+                    let (x_i, bound) = match &std_form.bounds[i] {
+                        Bound::Free => {
+                            assert!(d_i.abs() < EPS);
+                            (0., NonbasicBound::Free)
+                        }
+
+                        Bound::Lower(lb) => {
+                            assert!(d_i > -EPS);
+                            (*lb, NonbasicBound::Lower)
+                        }
+
+                        Bound::Upper(ub) => {
+                            assert!(d_i < EPS);
+                            (*ub, NonbasicBound::Upper)
+                        }
+
+                        Bound::TwoSided(lb, ub) => {
+                            if d_i >= 0. {
+                                (*lb, NonbasicBound::Lower)
+                            } else {
+                                (*ub, NonbasicBound::Upper)
+                            }
+                        }
+
+                        Bound::Fixed(val) => (*val, NonbasicBound::Lower),
+                    };
+
+                    Some((x_i, Nonbasic::new(i, bound)))
+                } else {
+                    None
+                }
+            })
+            .unzip();
+
+        let x_N = nalgebra::DVector::from_vec(x_N);
+
+        println!("B: {:?}", B);
+        println!("N: {:?}", N);
+
+        let c_B = std_form.c.select_rows(B.iter().map(|b| &b.index));
+        let A_B_lu = std_form.A.select_columns(B.iter().map(|b| &b.index)).lu();
+        let A_N = std_form.A.select_columns(N.iter().map(|b| &b.index));
+
+        let x_B = A_B_lu.solve(&(&std_form.b - &A_N * &x_N)).unwrap();
+
+        let mut x = nalgebra::DVector::zeros(std_form.A.ncols());
+
+        for (b, val) in B.iter().zip(x_B.iter()) {
+            x[b.index] = *val;
+        }
+
+        for (n, val) in N.iter().zip(x_N.iter()) {
+            x[n.index] = *val;
+        }
+
+        println!("x:{}", x);
+        println!("obj:{}", std_form.obj(&x));
+
+        let y_tilde = A_B_lu.u().tr_solve_upper_triangular(&c_B).unwrap();
+        let mut y = A_B_lu.l().tr_solve_lower_triangular(&y_tilde).unwrap();
+        A_B_lu.p().inv_permute_rows(&mut y);
+
+        println!("y:{}", y);
+
+        let point = DualFeasiblePoint {
+            y,
+            point: Point { x, N, B },
+        };
+
+        DualPhase2 { point, std_form }
     }
 }

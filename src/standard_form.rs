@@ -1,8 +1,8 @@
 #![allow(non_snake_case)]
 
 use crate::problem::{Bound, ConstraintOp, Problem};
-
 use log::debug;
+use std::collections::HashMap;
 
 pub trait BasicPoint: std::ops::Deref<Target = Point> + std::ops::DerefMut<Target = Point> {
     fn into_pt(self) -> Point;
@@ -60,7 +60,7 @@ impl StandardForm {
 
     #[inline]
     pub fn extract_solution<'a>(&self, point: &'a Point) -> nalgebra::DVectorSlice<'a, f64> {
-        let n = self.prob.vars().len();
+        let n = self.prob.variables.len();
         point.x.rows(0, n)
     }
 }
@@ -69,7 +69,7 @@ impl std::convert::From<Problem> for StandardForm {
     fn from(prob: Problem) -> StandardForm {
         debug!("converting problem to standard form");
 
-        let n = prob.vars().len();
+        let n = prob.variables.len();
         let m = prob.constraints().len();
 
         let num_slack_vars = prob
@@ -89,10 +89,12 @@ impl std::convert::From<Problem> for StandardForm {
 
         //default to Lower(0.), because that's what the slack variable bounds are
         let mut bounds = vec![Bound::Lower(0.); total_vars];
+        let mut id_to_index = HashMap::with_capacity(prob.variables.len());
 
-        for (i, var) in prob.vars().iter().enumerate() {
+        for (i, var) in prob.variables.iter().enumerate() {
             c[i] = var.obj_coeff;
             bounds[i] = var.bound;
+            id_to_index.insert(var.id, i);
         }
 
         let mut cur_slack_col = A.ncols().saturating_sub(1);
@@ -101,7 +103,8 @@ impl std::convert::From<Problem> for StandardForm {
             b[i] = constraint.rhs;
 
             for (id, coeff) in &constraint.coeffs {
-                A[(i, id.into())] = *coeff;
+                let var_index = *id_to_index.get(id).unwrap();
+                A[(i, var_index)] = *coeff;
             }
 
             if let Some(slack_coeff) = match constraint.op {

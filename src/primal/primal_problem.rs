@@ -292,7 +292,7 @@ impl std::convert::From<PrimalPhase1> for PrimalPhase2 {
             std_form.bounds[*i] = Bound::Fixed(0.);
         }
 
-        for (i, var) in std_form.prob.vars().iter().enumerate() {
+        for (i, var) in std_form.prob.variables.iter().enumerate() {
             std_form.c[i] = var.obj_coeff;
 
             // some of the free variable bounds may have been set to Fixed(0)

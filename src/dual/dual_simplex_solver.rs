@@ -36,21 +36,19 @@ impl DualSimplexSolver {
             SolutionStatus::Optimal => {
                 let obj = phase_1.obj();
 
-                assert!(obj > -EPS);
+                assert!(obj < EPS);
 
-                if obj < EPS {
+                if obj > -EPS {
                     debug!("found feasible point");
                     phase_1.into()
                 } else {
-                    todo!("is primal problem unbounded or infeasible? run primal phase 1")
+                    todo!("is primal problem unbounded or infeasible? run primal phase 1?")
                 }
             }
 
-            SolutionStatus::Infeasible => {
-                todo!("is primal problem unbounded or infeasible? run primal phase 1")
-            }
+            SolutionStatus::Infeasible => return Ok(SolverResult::Infeasible),
 
-            SolutionStatus::Unbounded => return Ok(SolverResult::Infeasible),
+            SolutionStatus::Unbounded => panic!("phase 1 should never be unbounded"),
 
             SolutionStatus::MaxIter => {
                 debug!("phase 1 reached maximum iterations");
@@ -68,10 +66,7 @@ impl DualSimplexSolver {
                 SolverResult::Optimal(Solution::new(phase_2.std_form, opt_pt))
             }
 
-            SolutionStatus::Infeasible => {
-                todo!("is primal problem unbounded or infeasible? run primal phase 1")
-            }
-
+            SolutionStatus::Infeasible => SolverResult::Infeasible,
             SolutionStatus::Unbounded => SolverResult::Unbounded,
             SolutionStatus::MaxIter => SolverResult::MaxIter { obj: phase_2.obj() },
         })
@@ -106,7 +101,7 @@ impl DualSimplexSolver {
             {
                 if c_i > 0. {
                     match *bound {
-                        Bound::Free | Bound::Upper(..) => return Ok(SolutionStatus::Unbounded),
+                        Bound::Free | Bound::Upper(..) => return Ok(SolutionStatus::Infeasible), //dual unbounded
                         Bound::Lower(lb) | Bound::TwoSided(lb, ..) | Bound::Fixed(lb) => {
                             *x_i = lb;
                             N.push(Nonbasic::new(i, NonbasicBound::Lower));
@@ -114,7 +109,7 @@ impl DualSimplexSolver {
                     }
                 } else if c_i < 0. {
                     match *bound {
-                        Bound::Free | Bound::Lower(..) => return Ok(SolutionStatus::Unbounded),
+                        Bound::Free | Bound::Lower(..) => return Ok(SolutionStatus::Infeasible), //dual unbounded
                         Bound::Upper(ub) | Bound::TwoSided(.., ub) | Bound::Fixed(ub) => {
                             *x_i = ub;
                             N.push(Nonbasic::new(i, NonbasicBound::Upper));
@@ -158,6 +153,10 @@ impl DualSimplexSolver {
         let mut c_N =
             nalgebra::DVector::from_iterator(N.len(), N.iter().map(|i| std_form.c[i.index]));
 
+        println!("A:{}", std_form.A);
+        println!("b:{}", std_form.b);
+        println!("c:{}", std_form.c);
+        println!("bounds:\n{:?}", std_form.bounds);
         println!("A_N:{}", A_N);
 
         let mut d = &std_form.c - std_form.A.tr_mul(y);
@@ -212,7 +211,7 @@ impl DualSimplexSolver {
                         }
                     }
 
-                    Bound::Fixed(val) => None,
+                    Bound::Fixed(_val) => None,
                 };
 
                 bound_change.map(|(delta, nonbasic_bound)| (i, delta, nonbasic_bound))

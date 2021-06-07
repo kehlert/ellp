@@ -13,6 +13,7 @@ pub struct Problem {
     pub variables: Vec<Variable>,
     pub constraints: Vec<Constraint>,
     var_names: HashSet<String>, //these strings are duplicated in the variables
+    var_ids: HashSet<VariableId>,
 }
 
 impl Problem {
@@ -24,6 +25,19 @@ impl Problem {
         &mut self,
         obj_coeff: f64,
         bound: Bound,
+        name: Option<String>,
+    ) -> Result<VariableId, EllPError> {
+        let id = VariableId(self.variables.len());
+        println!("{:?}, {:?}", name, id);
+        self.add_var_with_id(obj_coeff, bound, id, name)?;
+        Ok(id)
+    }
+
+    pub fn add_var_with_id(
+        &mut self,
+        obj_coeff: f64,
+        bound: Bound,
+        id: VariableId,
         name: Option<String>,
     ) -> Result<VariableId, EllPError> {
         if let Bound::TwoSided(lb, ub) = bound {
@@ -56,18 +70,17 @@ impl Problem {
             }
         }
 
-        let var = Variable::new(VariableId(self.variables.len()), obj_coeff, bound, name);
+        let var = Variable::new(id, obj_coeff, bound, name);
         self.variables.push(var);
-        let var = self.variables.last().unwrap();
-        Ok(var.id)
-    }
 
-    pub fn var(&self, id: VariableId) -> Option<&Variable> {
-        self.variables.get(id.0)
-    }
+        if !self.var_ids.insert(id) {
+            return Err(EllPError::new(format!(
+                "cannot add variable with {:?}, that id is already used",
+                id
+            )));
+        }
 
-    pub fn vars(&self) -> &[Variable] {
-        self.variables.as_slice()
+        Ok(id)
     }
 
     pub fn add_constraint(
@@ -78,11 +91,12 @@ impl Problem {
     ) -> Result<(), EllPError> {
         match coeffs
             .iter()
-            .find(|(id, _coeff)| id.0 >= self.variables.len())
+            .find(|(id, _coeff)| !self.var_ids.contains(id))
         {
             Some((invalid_var, _coeff)) => {
                 Err(EllPError::new(format!("{:?} is invalid", invalid_var)))
             }
+
             None => {
                 self.constraints.push(Constraint { coeffs, op, rhs });
                 Ok(())
@@ -278,6 +292,12 @@ impl Constraint {
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub struct VariableId(usize);
 
+impl std::convert::From<usize> for VariableId {
+    fn from(id: usize) -> Self {
+        Self(id)
+    }
+}
+
 impl std::convert::From<VariableId> for usize {
     fn from(id: VariableId) -> Self {
         id.0
@@ -343,7 +363,7 @@ impl std::fmt::Display for Variable {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match &self.name {
             Some(name) => write!(f, "{}", name),
-            None => write!(f, "id[{:?}]", self.id),
+            None => write!(f, "id[{}]", self.id.0),
         }
     }
 }
@@ -369,7 +389,7 @@ mod tests {
         let var_id = prob
             .add_var(1., Bound::Free, Some("x".to_string()))
             .unwrap();
-        assert_eq!(prob.var(var_id).unwrap().name.as_ref().unwrap(), "x");
+        assert_eq!(prob.variables[0].name.as_ref().unwrap(), "x");
     }
 
     #[test]
@@ -378,7 +398,7 @@ mod tests {
         let var_id = prob
             .add_var(1., Bound::TwoSided(1., 2.), Some("x".to_string()))
             .unwrap();
-        let var = prob.var(var_id).unwrap();
+        let var = &prob.variables[0];
         assert_eq!(var.bound, Bound::TwoSided(1., 2.));
     }
 

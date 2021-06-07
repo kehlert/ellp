@@ -52,7 +52,7 @@ impl PrimalSimplexSolver {
             }
         };
 
-        debug!("initial basic feasible point:\n{:#?}", phase_2.pt());
+        debug!("initial primal feasible point:\n{:#?}", phase_2.pt());
 
         Ok(match self.solve_with_initial(&mut phase_2)? {
             SolutionStatus::Optimal => {

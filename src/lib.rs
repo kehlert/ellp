@@ -703,10 +703,10 @@ mod tests {
             .add_var(0., Bound::Free, Some("x5".to_string()))
             .unwrap();
 
-        prob.add_constraint(vec![(x1, 2.5), (x2, 2.5)], ConstraintOp::Gte, 5.)
+        prob.add_constraint(vec![(x1, 2.5), (x2, 3.5)], ConstraintOp::Gte, 5.)
             .unwrap();
 
-        prob.add_constraint(vec![(x2, 2.5), (x1, 2.5)], ConstraintOp::Lte, 1.)
+        prob.add_constraint(vec![(x2, 2.5), (x1, 4.5)], ConstraintOp::Lte, 1.)
             .unwrap();
 
         prob.add_constraint(vec![(x3, -1.), (x4, -3.), (x5, -4.)], ConstraintOp::Eq, 2.)
@@ -715,10 +715,10 @@ mod tests {
         let solver = DualSimplexSolver::new(Some(2));
         let result = solver.solve(prob).unwrap();
 
-        // assert_optimal(
-        //     &result,
-        //     19.1578947368421,
-        //     &[-0.94736842105, 2.105263157894, 0., 0., -0.5],
-        // )
+        assert_optimal(
+            &result,
+            19.1578947368421,
+            &[-0.94736842105, 2.105263157894, 0., 0., -0.5],
+        )
     }
 }
