@@ -50,6 +50,13 @@ pub struct DualPhase1 {
     orig_std_form: StandardForm,
 }
 
+impl DualPhase1 {
+    #[inline]
+    pub fn into_orig_prob(self) -> Problem {
+        self.orig_std_form.prob
+    }
+}
+
 impl DualProblem for DualPhase1 {
     fn obj(&self) -> f64 {
         self.std_form.obj(&self.point.x)
@@ -175,7 +182,6 @@ impl std::convert::From<Problem> for DualPhase1 {
             .map(|i| Nonbasic::new(perm_cols[i], NonbasicBound::Lower))
             .collect();
 
-        //would be good to avoid creating this vector
         let c_B = nalgebra::DVector::from_iterator(B.len(), B.iter().map(|i| std_form.c[i.index]));
         let A_B = std_form.A.select_columns(B.iter().map(|b| &b.index));
 
@@ -185,68 +191,97 @@ impl std::convert::From<Problem> for DualPhase1 {
         println!("B:{:?}", B);
 
         let A_B_lu = A_B.lu();
-        let y_tilde = A_B_lu.u().tr_solve_upper_triangular(&c_B).unwrap();
-        let mut y = A_B_lu.l().tr_solve_lower_triangular(&y_tilde).unwrap();
-        A_B_lu.p().inv_permute_rows(&mut y);
 
-        let d = &std_form.c - std_form.A.tr_mul(&y);
+        if !B.is_empty() {
+            //would be good to avoid creating this vector
+            let y_tilde = A_B_lu.u().tr_solve_upper_triangular(&c_B).unwrap();
+            let mut y = A_B_lu.l().tr_solve_lower_triangular(&y_tilde).unwrap();
+            A_B_lu.p().inv_permute_rows(&mut y);
 
-        println!("y: {}", y);
-        println!("d: {}", d);
+            let d = &std_form.c - std_form.A.tr_mul(&y);
+            println!("y: {}", y);
+            println!("d: {}", d);
 
-        let mut x = nalgebra::DVector::zeros(std_form.bounds.len());
+            let mut x = nalgebra::DVector::zeros(std_form.bounds.len());
 
-        assert!(d.len() == std_form.bounds.len());
+            assert!(d.len() == std_form.bounds.len());
 
-        for n in &mut N {
-            let i = n.index;
+            for n in &mut N {
+                let i = n.index;
 
-            if let Bound::TwoSided(lb, ub) = std_form.bounds[i] {
-                if d[i] >= 0. {
+                if let Bound::TwoSided(lb, ub) = std_form.bounds[i] {
+                    if d[i] >= 0. {
+                        x[i] = lb;
+                        n.bound = NonbasicBound::Lower;
+                    } else {
+                        x[i] = ub;
+                        n.bound = NonbasicBound::Upper;
+                    }
+                } else {
+                    panic!("bounds should always be two-sided");
+                }
+            }
+
+            //assumes that, at this point, the elements of x correspond to x_B are 0
+            let b_tilde = &std_form.b - &std_form.A * &x;
+            let x_B = A_B_lu.solve(&b_tilde).unwrap();
+
+            assert!(x_B.len() == B.len());
+
+            for (i, val) in B.iter().zip(x_B.iter()) {
+                x[i.index] = *val;
+            }
+
+            println!("N:{:?}", N);
+
+            println!("{:?}", std_form.bounds);
+            println!("y: {}", y);
+            println!("x: {}", x);
+            println!("d: {}", d);
+            println!("Ax:{}", &std_form.A * &x);
+            println!("b:{}", std_form.b);
+
+            let point = DualFeasiblePoint {
+                y,
+                point: Point { x, N, B },
+            };
+
+            DualPhase1 {
+                std_form,
+                point,
+                orig_std_form,
+            }
+        } else {
+            let empty_vec = nalgebra::DVector::zeros(0);
+            let mut x = nalgebra::DVector::zeros(N.len());
+            assert_eq!(N.len(), std_form.bounds.len());
+
+            println!("HEREERERE111: {}", x);
+
+            for n in &mut N {
+                let i = n.index;
+
+                if let Bound::TwoSided(lb, _ub) = std_form.bounds[i] {
                     x[i] = lb;
                     n.bound = NonbasicBound::Lower;
                 } else {
-                    x[i] = ub;
-                    n.bound = NonbasicBound::Upper;
+                    panic!("bounds should always be two-sided");
                 }
-            } else {
-                panic!("bounds should always be two-sided");
             }
-        }
 
-        println!("N:{:?}", N);
+            println!("HEREERERE: {}", x);
+            println!("N: {:?}", N);
 
-        //assumes that, at this point, the elements of x correspond to x_B are 0
-        let b_tilde = &std_form.b - &std_form.A * &x;
-        let x_B = A_B_lu.solve(&b_tilde).unwrap();
+            let point = DualFeasiblePoint {
+                y: empty_vec,
+                point: Point { x, N, B },
+            };
 
-        assert!(x_B.len() == B.len());
-
-        for (i, val) in B.iter().zip(x_B.iter()) {
-            x[i.index] = *val;
-        }
-
-        println!("{:?}", std_form.bounds);
-        println!("y: {}", y);
-        println!("x: {}", x);
-        println!("d: {}", d);
-        println!("Ax:{}", &std_form.A * &x);
-        println!("b:{}", std_form.b);
-
-        let A_B_cols: Vec<_> = B.iter().map(|i| std_form.A.column(i.index)).collect();
-        let A_B = nalgebra::DMatrix::from_columns(&A_B_cols);
-        println!("A_B_T y:{}", A_B.tr_mul(&y));
-        println!("c_B: {}", c_B);
-
-        let point = DualFeasiblePoint {
-            y,
-            point: Point { x, N, B },
-        };
-
-        DualPhase1 {
-            std_form,
-            point,
-            orig_std_form,
+            DualPhase1 {
+                std_form,
+                point,
+                orig_std_form,
+            }
         }
     }
 }
@@ -321,32 +356,47 @@ impl std::convert::From<DualPhase1> for DualPhase2 {
         let A_B_lu = std_form.A.select_columns(B.iter().map(|b| &b.index)).lu();
         let A_N = std_form.A.select_columns(N.iter().map(|b| &b.index));
 
-        let x_B = A_B_lu.solve(&(&std_form.b - &A_N * &x_N)).unwrap();
+        if !B.is_empty() {
+            let x_B = A_B_lu.solve(&(&std_form.b - &A_N * &x_N)).unwrap();
 
-        let mut x = nalgebra::DVector::zeros(std_form.A.ncols());
+            let mut x = nalgebra::DVector::zeros(std_form.A.ncols());
 
-        for (b, val) in B.iter().zip(x_B.iter()) {
-            x[b.index] = *val;
+            assert!(B.len() == x_B.len());
+
+            for (b, val) in B.iter().zip(x_B.iter()) {
+                x[b.index] = *val;
+            }
+
+            assert!(N.len() == x_N.len());
+
+            for (n, val) in N.iter().zip(x_N.iter()) {
+                x[n.index] = *val;
+            }
+
+            println!("x:{}", x);
+            println!("obj:{}", std_form.obj(&x));
+
+            let y_tilde = A_B_lu.u().tr_solve_upper_triangular(&c_B).unwrap();
+            let mut y = A_B_lu.l().tr_solve_lower_triangular(&y_tilde).unwrap();
+            A_B_lu.p().inv_permute_rows(&mut y);
+
+            println!("y:{}", y);
+
+            let point = DualFeasiblePoint {
+                y,
+                point: Point { x, N, B },
+            };
+
+            DualPhase2 { point, std_form }
+        } else {
+            let empty_vec = nalgebra::DVector::zeros(0);
+
+            let point = DualFeasiblePoint {
+                y: empty_vec,
+                point: Point { x: x_N, N, B },
+            };
+
+            DualPhase2 { point, std_form }
         }
-
-        for (n, val) in N.iter().zip(x_N.iter()) {
-            x[n.index] = *val;
-        }
-
-        println!("x:{}", x);
-        println!("obj:{}", std_form.obj(&x));
-
-        let y_tilde = A_B_lu.u().tr_solve_upper_triangular(&c_B).unwrap();
-        let mut y = A_B_lu.l().tr_solve_lower_triangular(&y_tilde).unwrap();
-        A_B_lu.p().inv_permute_rows(&mut y);
-
-        println!("y:{}", y);
-
-        let point = DualFeasiblePoint {
-            y,
-            point: Point { x, N, B },
-        };
-
-        DualPhase2 { point, std_form }
     }
 }

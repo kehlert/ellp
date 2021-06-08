@@ -2,30 +2,6 @@ use ellp::*;
 
 const EPS: f64 = 0.00000001;
 
-#[allow(dead_code)]
-pub fn setup_logger(log_level: log::LevelFilter) {
-    use fern::colors::{Color, ColoredLevelConfig};
-    let colors = ColoredLevelConfig::new()
-        .debug(Color::White)
-        .info(Color::Green)
-        .warn(Color::BrightYellow)
-        .error(Color::BrightRed);
-
-    fern::Dispatch::new()
-        .format(move |out, message, record| {
-            out.finish(format_args!(
-                "{} | {:5} | {}",
-                chrono::Local::now().format("%Y-%m-%d %H:%M:%S%.6f"),
-                colors.color(record.level()),
-                message
-            ))
-        })
-        .level(log_level)
-        .chain(std::io::stdout())
-        .apply()
-        .unwrap();
-}
-
 pub fn assert_optimal(result: &SolverResult, expected_obj: f64, expected_x: &[f64]) {
     match result {
         SolverResult::Optimal(sol) => {

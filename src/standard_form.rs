@@ -37,6 +37,7 @@ impl StandardForm {
 
     #[inline]
     pub fn obj(&self, x: &nalgebra::DVector<f64>) -> f64 {
+        println!("{}, {}", self.c, x);
         self.c.dot(x)
     }
 
@@ -159,4 +160,18 @@ impl Basic {
     }
 }
 
-pub trait Phase2 {}
+impl std::fmt::Display for StandardForm {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        writeln!(f, "c:{}", self.c)?;
+        writeln!(f, "A:{}", self.A)?;
+        writeln!(f, "b:{}", self.b)?;
+
+        writeln!(f, "bounds:\n")?;
+
+        for (i, bound) in self.bounds.iter().enumerate() {
+            writeln!(f, "x{}: {}", i, bound)?;
+        }
+
+        Ok(())
+    }
+}

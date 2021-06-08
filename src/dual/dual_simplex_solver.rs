@@ -8,6 +8,7 @@ use crate::problem::{Bound, Problem};
 use crate::solver::{EllPResult, OptimalPoint, Solution, SolutionStatus, SolverResult};
 use crate::standard_form::{BasicPoint, Nonbasic, NonbasicBound};
 use crate::util::EPS;
+use crate::PrimalSimplexSolver;
 
 use log::debug;
 
@@ -30,6 +31,7 @@ impl DualSimplexSolver {
 
     pub fn solve(&self, prob: Problem) -> EllPResult {
         let mut phase_1: DualPhase1 = prob.into();
+
         println!("\n---------------------------\nPHASE 1\n---------------------------\n");
 
         let mut phase_2: DualPhase2 = match self.solve_with_initial(&mut phase_1)? {
@@ -42,7 +44,17 @@ impl DualSimplexSolver {
                     debug!("found feasible point");
                     phase_1.into()
                 } else {
-                    todo!("is primal problem unbounded or infeasible? run primal phase 1?")
+                    let primal_solver = PrimalSimplexSolver::default();
+                    let result = primal_solver.solve(phase_1.into_orig_prob())?;
+
+                    assert!(matches!(
+                        result,
+                        SolverResult::Infeasible
+                            | SolverResult::Unbounded
+                            | SolverResult::MaxIter { .. }
+                    ));
+
+                    return Ok(result);
                 }
             }
 
@@ -56,13 +68,14 @@ impl DualSimplexSolver {
             }
         };
 
-        debug!("initial dual feasible point:\n{:#?}", phase_2.pt());
-
         println!("\n---------------------------\nPHASE 2\n---------------------------\n");
+
+        debug!("initial dual feasible point:\n{:#?}", phase_2.pt());
 
         Ok(match self.solve_with_initial(&mut phase_2)? {
             SolutionStatus::Optimal => {
                 let opt_pt = OptimalPoint::new(phase_2.point.into_pt());
+                println!("optimal point:\n{:?}", opt_pt);
                 SolverResult::Optimal(Solution::new(phase_2.std_form, opt_pt))
             }
 
@@ -87,9 +100,16 @@ impl DualSimplexSolver {
         let N = &mut pt.N;
         let B = &mut pt.B;
 
+        println!("std form:\n{}", std_form);
+        println!("x:\n{}", x);
+        println!("B:\n{:?}", B);
+        println!("N:\n{:?}", N);
+
         if std_form.rows() == 0 {
             //trivial problem, and would run into errors if we proceed
             assert_eq!(std_form.c.len(), std_form.bounds.len());
+            assert_eq!(std_form.c.len(), x.len());
+
             assert!(B.is_empty());
             N.clear();
 
