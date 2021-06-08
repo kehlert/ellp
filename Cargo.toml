@@ -12,5 +12,6 @@ nalgebra = "*"
 thiserror = "*"
 
 [dev-dependencies]
-fern = {version = "*", features = ["colored"]}
 chrono = "*"
+fern = {version = "*", features = ["colored"]}
+paste = "*"

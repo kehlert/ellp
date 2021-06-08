@@ -64,6 +64,7 @@ dependencies = [
  "fern",
  "log",
  "nalgebra",
+ "paste",
  "thiserror",
 ]
 
