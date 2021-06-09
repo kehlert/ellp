@@ -354,7 +354,7 @@ impl DualSimplexSolver {
                 std::mem::swap(x, y);
             }
 
-            std::mem::swap(&mut c_B[leaving_index], &mut c_N[leaving_index]);
+            std::mem::swap(&mut c_B[leaving_index], &mut c_N[entering_index]);
 
             debug!("B after: {:?}", B);
             debug!("N after: {:?}", N);
