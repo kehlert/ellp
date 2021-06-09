@@ -28,7 +28,12 @@ impl PrimalSimplexSolver {
     }
 
     pub fn solve(&self, prob: Problem) -> EllPResult {
-        let mut phase_1: PrimalPhase1 = prob.into();
+        let mut phase_1: PrimalPhase1 = match prob.into() {
+            Some(phase_1) => phase_1,
+            None => return Ok(SolverResult::Infeasible),
+        };
+
+        println!("PRIMAL PHASE 1:\n{:?}", phase_1);
 
         let mut phase_2: PrimalPhase2 = match self.solve_with_initial(&mut phase_1)? {
             SolutionStatus::Optimal => {

@@ -106,9 +106,13 @@ impl PrimalProblem for PrimalPhase2 {
     }
 }
 
-impl std::convert::From<Problem> for PrimalPhase1 {
+//returns None if infeasible
+impl std::convert::From<Problem> for Option<PrimalPhase1> {
     fn from(prob: Problem) -> Self {
-        let mut std_form: StandardForm = prob.into();
+        let mut std_form: StandardForm = match prob.into() {
+            Some(std_form) => std_form,
+            None => return None,
+        };
 
         debug!("converting standard form to phase 1 standard form");
 
@@ -273,11 +277,11 @@ impl std::convert::From<Problem> for PrimalPhase1 {
             std_form.bounds.push(Bound::Lower(0.));
         }
 
-        PrimalPhase1 {
+        Some(PrimalPhase1 {
             phase_1_vars,
             std_form,
             feasible_point: PrimalFeasiblePoint(Point { x: v, N, B }),
-        }
+        })
     }
 }
 

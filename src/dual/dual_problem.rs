@@ -115,11 +115,15 @@ impl DualProblem for DualPhase2 {
     }
 }
 
-impl std::convert::From<Problem> for DualPhase1 {
+impl std::convert::From<Problem> for Option<DualPhase1> {
     fn from(prob: Problem) -> Self {
         println!("orig prob:\n{}", prob);
 
-        let orig_std_form: StandardForm = prob.into();
+        let orig_std_form: StandardForm = match prob.into() {
+            Some(std_form) => std_form,
+            None => return None,
+        };
+
         let mut phase_1_prob = Problem::new();
         let mut vars_kept = HashSet::new();
 
@@ -160,12 +164,16 @@ impl std::convert::From<Problem> for DualPhase1 {
 
         println!("{}", phase_1_prob);
 
-        let std_form: StandardForm = phase_1_prob.into();
+        let std_form: StandardForm = match phase_1_prob.into() {
+            Some(std_form) => std_form,
+            None => return None,
+        };
+
         let lu = std_form.A.transpose().lu();
 
         for u_i in lu.u().diagonal().iter() {
             if u_i.abs() < EPS {
-                todo!("repair the basis");
+                panic!("should always have a basis available");
             }
         }
 
@@ -209,16 +217,28 @@ impl std::convert::From<Problem> for DualPhase1 {
             for n in &mut N {
                 let i = n.index;
 
-                if let Bound::TwoSided(lb, ub) = std_form.bounds[i] {
-                    if d[i] >= 0. {
-                        x[i] = lb;
-                        n.bound = NonbasicBound::Lower;
-                    } else {
-                        x[i] = ub;
-                        n.bound = NonbasicBound::Upper;
+                match std_form.bounds[i] {
+                    Bound::TwoSided(lb, ub) => {
+                        if d[i] >= 0. {
+                            x[i] = lb;
+                            n.bound = NonbasicBound::Lower;
+                        } else {
+                            x[i] = ub;
+                            n.bound = NonbasicBound::Upper;
+                        }
                     }
-                } else {
-                    panic!("bounds should always be two-sided");
+
+                    Bound::Fixed(val) => {
+                        x[i] = val;
+
+                        if d[i] >= 0. {
+                            n.bound = NonbasicBound::Lower;
+                        } else {
+                            n.bound = NonbasicBound::Upper;
+                        }
+                    }
+
+                    _ => panic!("bounds should always be fixed or two-sided"),
                 }
             }
 
@@ -246,26 +266,24 @@ impl std::convert::From<Problem> for DualPhase1 {
                 point: Point { x, N, B },
             };
 
-            DualPhase1 {
+            Some(DualPhase1 {
                 std_form,
                 point,
                 orig_std_form,
-            }
+            })
         } else {
             let empty_vec = nalgebra::DVector::zeros(0);
             let mut x = nalgebra::DVector::zeros(N.len());
             assert_eq!(N.len(), std_form.bounds.len());
 
-            println!("HEREERERE111: {}", x);
-
             for n in &mut N {
                 let i = n.index;
+                n.bound = NonbasicBound::Lower;
 
-                if let Bound::TwoSided(lb, _ub) = std_form.bounds[i] {
-                    x[i] = lb;
-                    n.bound = NonbasicBound::Lower;
-                } else {
-                    panic!("bounds should always be two-sided");
+                match std_form.bounds[i] {
+                    Bound::TwoSided(lb, _ub) => x[i] = lb,
+                    Bound::Fixed(val) => x[i] = val,
+                    _ => panic!("bounds should always be fixed or two-sided"),
                 }
             }
 
@@ -277,11 +295,11 @@ impl std::convert::From<Problem> for DualPhase1 {
                 point: Point { x, N, B },
             };
 
-            DualPhase1 {
+            Some(DualPhase1 {
                 std_form,
                 point,
                 orig_std_form,
-            }
+            })
         }
     }
 }
@@ -291,6 +309,11 @@ impl std::convert::From<DualPhase1> for DualPhase2 {
         let phase_1_prob = phase_1.std_form.prob;
         let std_form = phase_1.orig_std_form;
         let mut is_basic = vec![false; std_form.cols()];
+
+        println!("OVER HERE!!!");
+        println!("{}", phase_1_prob);
+        println!("{:?}", phase_1_prob.variables);
+        println!("B: {:?}", phase_1.point.B);
 
         let B: Vec<_> = phase_1
             .point

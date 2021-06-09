@@ -1,7 +1,9 @@
 #![allow(non_snake_case)]
 
 use crate::problem::{Bound, ConstraintOp, Problem};
+use crate::util::EPS;
 use log::debug;
+use nalgebra::ComplexField;
 use std::collections::HashMap;
 
 pub trait BasicPoint: std::ops::Deref<Target = Point> + std::ops::DerefMut<Target = Point> {
@@ -66,8 +68,9 @@ impl StandardForm {
     }
 }
 
-impl std::convert::From<Problem> for StandardForm {
-    fn from(prob: Problem) -> StandardForm {
+//returns None if infeasible
+impl std::convert::From<Problem> for Option<StandardForm> {
+    fn from(prob: Problem) -> Self {
         debug!("converting problem to standard form");
 
         let n = prob.variables.len();
@@ -103,6 +106,10 @@ impl std::convert::From<Problem> for StandardForm {
         for (i, constraint) in prob.constraints().iter().enumerate() {
             b[i] = constraint.rhs;
 
+            if constraint.coeffs.is_empty() && b[i] != 0. {
+                return None;
+            }
+
             for (id, coeff) in &constraint.coeffs {
                 let var_index = *id_to_index.get(id).unwrap();
                 A[(i, var_index)] = *coeff;
@@ -120,13 +127,61 @@ impl std::convert::From<Problem> for StandardForm {
 
         assert!(cur_slack_col == n.saturating_sub(1));
 
-        StandardForm {
+        println!("INITIAL");
+
+        println!("A: {}", A);
+        println!("b: {}", b);
+
+        //remove redundant rows
+        let A_qr = A.transpose().col_piv_qr();
+        let mut R = A_qr.r();
+        A_qr.p().inv_permute_rows(&mut b);
+
+        //sometimes a diagonal element is nonzero when it should actually be zero
+        //can lead to issues when detecting infeasibility a couple lines below
+        for i in 0..R.nrows() {
+            let r_ii = &mut R[(i, i)];
+
+            if r_ii.abs() < EPS {
+                *r_ii = 0.
+            }
+        }
+
+        //need to handle R = [0] as a special case
+        //we know that R.ncols() >= R.nrows()
+
+        let is_trivial = !R.is_empty() && R[(0, 0)].abs() < EPS && b[0].abs() < EPS;
+
+        if !is_trivial {
+            println!("{:?}", R.tr_solve_upper_triangular(&b));
+            R.tr_solve_upper_triangular(&b)?;
+        }
+
+        A_qr.p().permute_rows(&mut b);
+
+        //now we know that the system is feasible, and we can remove redundant rows of [A, b]
+
+        //R.nrows() = min(A rows, A cols), which is the max rank of A
+        let num_indep_rows = (0..R.nrows())
+            .map(|i| (i, R[(i, i)]))
+            .find(|(_i, r)| r.abs() < EPS)
+            .map(|(i, _r)| i)
+            .unwrap_or_else(|| R.nrows());
+
+        let mut indep_rows = nalgebra::DVector::from_iterator(A.nrows(), 0..A.nrows());
+        A_qr.p().permute_rows(&mut indep_rows);
+        let indep_rows = indep_rows.rows(0, num_indep_rows);
+
+        let A = A.select_rows(indep_rows.as_slice());
+        let b = b.select_rows(indep_rows.as_slice());
+
+        Some(StandardForm {
             c,
             A,
             b,
             bounds,
             prob,
-        }
+        })
     }
 }
 

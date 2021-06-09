@@ -30,7 +30,10 @@ impl DualSimplexSolver {
     }
 
     pub fn solve(&self, prob: Problem) -> EllPResult {
-        let mut phase_1: DualPhase1 = prob.into();
+        let mut phase_1: DualPhase1 = match prob.into() {
+            Some(phase_1) => phase_1,
+            None => return Ok(SolverResult::Infeasible),
+        };
 
         println!("\n---------------------------\nPHASE 1\n---------------------------\n");
 
