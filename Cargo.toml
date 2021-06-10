@@ -10,11 +10,11 @@ keywords = ["linear", "programming", "optimization", "simplex", "solver"]
 categories = ["mathematics", "science"]
 
 [dependencies]
-log = "*"
-nalgebra = "*"
-thiserror = "*"
+log = "^0"
+nalgebra = "^0"
+thiserror = "^1"
 
 [dev-dependencies]
-chrono = "*"
-fern = {version = "*", features = ["colored"]}
-paste = "*"
+chrono = "^0"
+fern = {version = "^0", features = ["colored"]}
+paste = "^1"
