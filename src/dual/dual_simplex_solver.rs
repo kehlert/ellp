@@ -73,7 +73,7 @@ impl DualSimplexSolver {
 
         println!("\n---------------------------\nPHASE 2\n---------------------------\n");
 
-        debug!("initial dual feasible point:\n{:#?}", phase_2.pt());
+        //debug!("initial dual feasible point:\n{:#?}", phase_2.pt());
 
         Ok(match self.solve_with_initial(&mut phase_2)? {
             SolutionStatus::Optimal => {
@@ -97,11 +97,34 @@ impl DualSimplexSolver {
         // let (x, N, B) = pt.unpack();
 
         let y = &mut pt.y;
+        let mut d = &std_form.c - std_form.A.tr_mul(y);
 
         let pt = &mut pt.point;
         let x = &mut pt.x;
         let N = &mut pt.N;
         let B = &mut pt.B;
+
+        println!("c:{}", std_form.c);
+        println!("A:{}", std_form.A);
+        println!("y:{}", y);
+        println!("d:{}", d);
+        println!("B:{:?}", B);
+        println!("N:{:?}", N);
+        println!("x: {}", x);
+
+        for n in N.as_slice() {
+            let d_i = d[n.index];
+
+            let infeasible = match n.bound {
+                NonbasicBound::Lower => d_i < -EPS,
+                NonbasicBound::Upper => d_i > EPS,
+                NonbasicBound::Free => d_i.abs() > EPS,
+            };
+
+            if infeasible {
+                panic!("initial point of dual phase 2 is dual infeasible");
+            }
+        }
 
         println!("std form:\n{}", std_form);
         println!("x:\n{}", x);
@@ -182,8 +205,6 @@ impl DualSimplexSolver {
         println!("bounds:\n{:?}", std_form.bounds);
         println!("A_N:{}", A_N);
 
-        let mut d = &std_form.c - std_form.A.tr_mul(y);
-
         let mut iter = 0u64;
         let mut obj = std_form.dual_obj(y, &d);
 
@@ -198,6 +219,12 @@ impl DualSimplexSolver {
             }
 
             iter += 1;
+
+            println!("y:{}", y);
+            println!("d:{}", d);
+            println!("B:{:?}", B);
+            println!("N:{:?}", N);
+            println!("x: {}", x);
 
             //TODO check that objective is nondecreasing
             //could do an online update of the objective
@@ -216,6 +243,7 @@ impl DualSimplexSolver {
                             None
                         }
                     }
+
                     Bound::Upper(ub) => {
                         if x_i > ub {
                             Some((x_i - ub, NonbasicBound::Upper))

@@ -310,11 +310,6 @@ impl std::convert::From<DualPhase1> for DualPhase2 {
         let std_form = phase_1.orig_std_form;
         let mut is_basic = vec![false; std_form.cols()];
 
-        println!("OVER HERE!!!");
-        println!("{}", phase_1_prob);
-        println!("{:?}", phase_1_prob.variables);
-        println!("B: {:?}", phase_1.point.B);
-
         let B: Vec<_> = phase_1
             .point
             .B
@@ -326,60 +321,61 @@ impl std::convert::From<DualPhase1> for DualPhase2 {
             })
             .collect();
 
-        let d = &std_form.c - std_form.A.tr_mul(&phase_1.point.y);
-        println!("d: {}", d);
+        if !B.is_empty() {
+            let c_B = std_form.c.select_rows(B.iter().map(|b| &b.index));
+            let A_B_lu = std_form.A.select_columns(B.iter().map(|b| &b.index)).lu();
 
-        let (x_N, N): (Vec<_>, Vec<_>) = is_basic
-            .iter()
-            .enumerate()
-            .filter_map(|(i, b)| {
-                if !b {
-                    let d_i = d[i];
+            let y_tilde = A_B_lu.u().tr_solve_upper_triangular(&c_B).unwrap();
+            let mut y = A_B_lu.l().tr_solve_lower_triangular(&y_tilde).unwrap();
+            A_B_lu.p().inv_permute_rows(&mut y);
 
-                    let (x_i, bound) = match &std_form.bounds[i] {
-                        Bound::Free => {
-                            assert!(d_i.abs() < EPS);
-                            (0., NonbasicBound::Free)
-                        }
+            let d = &std_form.c - std_form.A.tr_mul(&y);
 
-                        Bound::Lower(lb) => {
-                            assert!(d_i > -EPS);
-                            (*lb, NonbasicBound::Lower)
-                        }
+            let (x_N, N): (Vec<_>, Vec<_>) = is_basic
+                .iter()
+                .enumerate()
+                .filter_map(|(i, b)| {
+                    if !b {
+                        let d_i = d[i];
 
-                        Bound::Upper(ub) => {
-                            assert!(d_i < EPS);
-                            (*ub, NonbasicBound::Upper)
-                        }
+                        let (x_i, bound) = match &std_form.bounds[i] {
+                            Bound::Free => {
+                                assert!(d_i.abs() < EPS);
+                                (0., NonbasicBound::Free)
+                            }
 
-                        Bound::TwoSided(lb, ub) => {
-                            if d_i >= 0. {
+                            Bound::Lower(lb) => {
+                                assert!(d_i > -EPS);
                                 (*lb, NonbasicBound::Lower)
-                            } else {
+                            }
+
+                            Bound::Upper(ub) => {
+                                assert!(d_i < EPS);
                                 (*ub, NonbasicBound::Upper)
                             }
-                        }
 
-                        Bound::Fixed(val) => (*val, NonbasicBound::Lower),
-                    };
+                            Bound::TwoSided(lb, ub) => {
+                                if d_i >= 0. {
+                                    (*lb, NonbasicBound::Lower)
+                                } else {
+                                    (*ub, NonbasicBound::Upper)
+                                }
+                            }
 
-                    Some((x_i, Nonbasic::new(i, bound)))
-                } else {
-                    None
-                }
-            })
-            .unzip();
+                            Bound::Fixed(val) => (*val, NonbasicBound::Lower),
+                        };
 
-        let x_N = nalgebra::DVector::from_vec(x_N);
+                        println!("i: {}, x_i: {}, d_i: {}", i, x_i, d_i);
 
-        println!("B: {:?}", B);
-        println!("N: {:?}", N);
+                        Some((x_i, Nonbasic::new(i, bound)))
+                    } else {
+                        None
+                    }
+                })
+                .unzip();
 
-        let c_B = std_form.c.select_rows(B.iter().map(|b| &b.index));
-        let A_B_lu = std_form.A.select_columns(B.iter().map(|b| &b.index)).lu();
-        let A_N = std_form.A.select_columns(N.iter().map(|b| &b.index));
-
-        if !B.is_empty() {
+            let x_N = nalgebra::DVector::from_vec(x_N);
+            let A_N = std_form.A.select_columns(N.iter().map(|b| &b.index));
             let x_B = A_B_lu.solve(&(&std_form.b - &A_N * &x_N)).unwrap();
 
             let mut x = nalgebra::DVector::zeros(std_form.A.ncols());
@@ -396,15 +392,6 @@ impl std::convert::From<DualPhase1> for DualPhase2 {
                 x[n.index] = *val;
             }
 
-            println!("x:{}", x);
-            println!("obj:{}", std_form.obj(&x));
-
-            let y_tilde = A_B_lu.u().tr_solve_upper_triangular(&c_B).unwrap();
-            let mut y = A_B_lu.l().tr_solve_lower_triangular(&y_tilde).unwrap();
-            A_B_lu.p().inv_permute_rows(&mut y);
-
-            println!("y:{}", y);
-
             let point = DualFeasiblePoint {
                 y,
                 point: Point { x, N, B },
@@ -413,6 +400,47 @@ impl std::convert::From<DualPhase1> for DualPhase2 {
             DualPhase2 { point, std_form }
         } else {
             let empty_vec = nalgebra::DVector::zeros(0);
+            let number_nonbasic = std_form.A.ncols();
+            let mut x_N = nalgebra::DVector::zeros(number_nonbasic);
+
+            let N: Vec<_> = is_basic
+                .iter()
+                .enumerate()
+                .filter_map(|(i, b)| {
+                    if !b {
+                        let bound = match &std_form.bounds[i] {
+                            Bound::Free => {
+                                x_N[i] = 0.;
+                                NonbasicBound::Free
+                            }
+
+                            Bound::Lower(lb) => {
+                                x_N[i] = *lb;
+                                NonbasicBound::Lower
+                            }
+
+                            Bound::Upper(ub) => {
+                                x_N[i] = *ub;
+                                NonbasicBound::Upper
+                            }
+
+                            Bound::TwoSided(lb, _ub) => {
+                                x_N[i] = *lb;
+                                NonbasicBound::Lower
+                            }
+
+                            Bound::Fixed(val) => {
+                                x_N[i] = *val;
+                                NonbasicBound::Lower
+                            }
+                        };
+
+                        Some(Nonbasic::new(i, bound))
+                    } else {
+                        None
+                    }
+                })
+                .collect();
 
             let point = DualFeasiblePoint {
                 y: empty_vec,

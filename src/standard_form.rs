@@ -48,6 +48,8 @@ impl StandardForm {
 
         let mut obj = self.b.dot(y);
 
+        println!("y^T b: {}", obj);
+
         for (i, bound) in self.bounds.iter().enumerate() {
             match bound {
                 Bound::Free => (),

@@ -241,7 +241,7 @@ impl std::fmt::Display for Bound {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
             Bound::Free => write!(f, "(-{inf}, {inf})", inf = INF_STR),
-            Bound::Lower(lb) => write!(f, "[-{}, {inf})", lb, inf = INF_STR),
+            Bound::Lower(lb) => write!(f, "[{}, {inf})", lb, inf = INF_STR),
             Bound::Upper(ub) => write!(f, "(-{inf}, {}]", ub, inf = INF_STR),
             Bound::TwoSided(lb, ub) => write!(f, "[{}, {}]", lb, ub),
             Bound::Fixed(val) => write!(f, "[{val}, {val}]", val = val),
@@ -290,8 +290,8 @@ impl Constraint {
 
             write!(
                 f,
-                "{} {} {} ",
-                if *coeff > 0. { "+" } else { "-" },
+                "{:+} {} {} ",
+                if *coeff >= 0. { "+" } else { "-" },
                 coeff.abs(),
                 var
             )?;

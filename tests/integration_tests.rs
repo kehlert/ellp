@@ -92,7 +92,7 @@ generate_tests! {
     linear_system_2d,
     linear_system_3d,
     linear_system_3d_infeasible,
-    //small_prob_1,
+    small_prob_1,
     small_prob_2,
     small_prob_3,
     small_prob_4,
@@ -101,5 +101,5 @@ generate_tests! {
     small_prob_7,
     small_prob_unbounded_1,
     small_prob_unbounded_2,
-    // beale_cycle,
+    //beale_cycle,
 }
