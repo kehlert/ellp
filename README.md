@@ -1,6 +1,4 @@
-# ellp
-Linear program solver written in Rust
+# Ellp
+Linear programming library that provides primal and dual simplex solvers.
 
-currently using dense matrices, because there seem to be no available sparse LU factorizations written in Rust
-
-## Work in progress
+The primal and dual solvers are currently working for a small set of test problems. This library is a *work-in-progress*.
