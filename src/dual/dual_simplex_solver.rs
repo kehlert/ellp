@@ -334,13 +334,13 @@ impl DualSimplexSolver {
 
             debug!("alpha_q: {}", alpha_q);
 
-            d[leaving_index] = -theta_dual;
+            d[leaving.index] = -theta_dual;
 
             for (i, n) in N.iter().enumerate() {
                 d[n.index] -= theta_dual * alpha[i]
             }
 
-            d[entering_index] = 0.;
+            d[entering.index] = 0.;
 
             y.add_assign(theta_dual * &rho);
 

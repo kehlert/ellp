@@ -101,5 +101,5 @@ generate_tests! {
     small_prob_7,
     small_prob_unbounded_1,
     small_prob_unbounded_2,
-    //beale_cycle,
+    beale_cycle,
 }
