@@ -8,9 +8,7 @@ Linear programming library that provides primal and dual simplex solvers. Both s
 
 ## Examples
 
-Here is example code that finds the solution with the primal simplex solver, and then finds the same solution with the dual version.
-
-First we setup the problem
+Here is example code that sets up a linear program, and then solves it with both the primal and dual simplex solvers.
 
 
 ```rust
@@ -53,7 +51,7 @@ First we setup the problem
     let dual_solver = DualSimplexSolver::default();
 
     let primal_result = primal_solver.solve(&prob).unwrap();
-    let dual_result = primal_solver.solve(&prob).unwrap();
+    let dual_result = dual_solver.solve(&prob).unwrap();
 
     if let SolverResult::Optimal(sol) = primal_result {
         println!("primal obj: {}", sol.obj());
