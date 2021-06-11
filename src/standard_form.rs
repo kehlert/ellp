@@ -2,8 +2,16 @@
 
 use crate::problem::{Bound, ConstraintOp, Problem};
 use crate::util::EPS;
+
 use log::debug;
 use std::collections::HashMap;
+
+pub trait StandardizedProblem {
+    type FeasiblePoint;
+
+    fn obj(&self) -> f64;
+    fn unpack(&mut self) -> (&StandardForm, &mut Self::FeasiblePoint);
+}
 
 pub trait BasicPoint: std::ops::Deref<Target = Point> + std::ops::DerefMut<Target = Point> {
     fn into_pt(self) -> Point;
@@ -72,10 +80,10 @@ impl std::convert::From<Problem> for Option<StandardForm> {
         debug!("converting problem to standard form");
 
         let n = prob.variables.len();
-        let m = prob.constraints().len();
+        let m = prob.constraints.len();
 
         let num_slack_vars = prob
-            .constraints()
+            .constraints
             .iter()
             .map(|constraint| match constraint.op {
                 ConstraintOp::Lte | ConstraintOp::Gte => 1,
@@ -101,7 +109,7 @@ impl std::convert::From<Problem> for Option<StandardForm> {
 
         let mut cur_slack_col = A.ncols().saturating_sub(1);
 
-        for (i, constraint) in prob.constraints().iter().enumerate() {
+        for (i, constraint) in prob.constraints.iter().enumerate() {
             b[i] = constraint.rhs;
 
             if constraint.coeffs.is_empty() && b[i] != 0. {

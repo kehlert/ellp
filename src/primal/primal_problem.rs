@@ -2,18 +2,12 @@
 
 use crate::problem::{Bound, Problem};
 use crate::solver::OptimalPoint;
-use crate::standard_form::{Basic, BasicPoint, Nonbasic, NonbasicBound, Point, StandardForm};
+use crate::standard_form::{
+    Basic, BasicPoint, Nonbasic, NonbasicBound, Point, StandardForm, StandardizedProblem,
+};
 use crate::util::EPS;
 
 use log::debug;
-
-pub trait PrimalProblem {
-    fn obj(&self) -> f64;
-    fn std_form(&self) -> &StandardForm;
-    fn pt(&self) -> &PrimalFeasiblePoint;
-    fn pt_mut(&mut self) -> &mut PrimalFeasiblePoint;
-    fn unpack(&mut self) -> (&StandardForm, &mut PrimalFeasiblePoint);
-}
 
 #[derive(Debug, Clone)]
 pub struct PrimalFeasiblePoint(Point);
@@ -44,65 +38,41 @@ impl std::ops::DerefMut for PrimalFeasiblePoint {
 #[derive(Debug)]
 pub struct PrimalPhase1 {
     pub std_form: StandardForm,
-    pub feasible_point: PrimalFeasiblePoint,
+    pub point: PrimalFeasiblePoint,
     phase_1_vars: Vec<usize>,
 }
 
-impl PrimalProblem for PrimalPhase1 {
+impl StandardizedProblem for PrimalPhase1 {
+    type FeasiblePoint = PrimalFeasiblePoint;
+
+    #[inline]
     fn obj(&self) -> f64 {
-        self.std_form.obj(&self.feasible_point.x)
+        self.std_form.obj(&self.point.x)
     }
 
     #[inline]
-    fn std_form(&self) -> &StandardForm {
-        &self.std_form
-    }
-
-    #[inline]
-    fn pt(&self) -> &PrimalFeasiblePoint {
-        &self.feasible_point
-    }
-
-    #[inline]
-    fn pt_mut(&mut self) -> &mut PrimalFeasiblePoint {
-        &mut self.feasible_point
-    }
-
-    #[inline]
-    fn unpack(&mut self) -> (&StandardForm, &mut PrimalFeasiblePoint) {
-        (&self.std_form, &mut self.feasible_point)
+    fn unpack(&mut self) -> (&StandardForm, &mut Self::FeasiblePoint) {
+        (&self.std_form, &mut self.point)
     }
 }
 
 #[derive(Debug)]
 pub struct PrimalPhase2 {
     pub std_form: StandardForm,
-    pub feasible_point: PrimalFeasiblePoint,
+    pub point: PrimalFeasiblePoint,
 }
 
-impl PrimalProblem for PrimalPhase2 {
+impl StandardizedProblem for PrimalPhase2 {
+    type FeasiblePoint = PrimalFeasiblePoint;
+
+    #[inline]
     fn obj(&self) -> f64 {
-        self.std_form.obj(&self.feasible_point.x)
-    }
-
-    #[inline]
-    fn std_form(&self) -> &StandardForm {
-        &self.std_form
-    }
-
-    #[inline]
-    fn pt(&self) -> &PrimalFeasiblePoint {
-        &self.feasible_point
-    }
-
-    #[inline]
-    fn pt_mut(&mut self) -> &mut PrimalFeasiblePoint {
-        &mut self.feasible_point
+        self.std_form.obj(&self.point.x)
     }
 
     #[inline]
     fn unpack(&mut self) -> (&StandardForm, &mut PrimalFeasiblePoint) {
-        (&self.std_form, &mut self.feasible_point)
+        (&self.std_form, &mut self.point)
     }
 }
 
@@ -280,7 +250,7 @@ impl std::convert::From<Problem> for Option<PrimalPhase1> {
         Some(PrimalPhase1 {
             phase_1_vars,
             std_form,
-            feasible_point: PrimalFeasiblePoint(Point { x: v, N, B }),
+            point: PrimalFeasiblePoint(Point { x: v, N, B }),
         })
     }
 }
@@ -303,18 +273,15 @@ impl std::convert::From<PrimalPhase1> for PrimalPhase2 {
             std_form.bounds[i] = var.bound;
         }
 
-        let mut feasible_point = phase_1.feasible_point;
+        let mut point = phase_1.point;
 
-        for var in &mut feasible_point.N {
+        for var in &mut point.N {
             if matches!(std_form.bounds[var.index], Bound::Free) {
                 var.bound = NonbasicBound::Free;
             }
         }
 
-        PrimalPhase2 {
-            std_form,
-            feasible_point,
-        }
+        PrimalPhase2 { std_form, point }
     }
 }
 

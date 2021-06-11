@@ -103,10 +103,6 @@ impl Problem {
         }
     }
 
-    pub fn constraints(&self) -> &[Constraint] {
-        self.constraints.as_slice()
-    }
-
     pub fn is_feasible(&self, x: &[f64]) -> bool {
         if x.len() != self.variables.len() {
             return false;

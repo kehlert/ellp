@@ -1,11 +1,12 @@
 #![allow(non_snake_case)]
 
-use super::primal_problem::{PrimalPhase1, PrimalPhase2, PrimalProblem};
-
+use super::primal_problem::{PrimalFeasiblePoint, PrimalPhase1, PrimalPhase2};
 use crate::error::EllPError;
 use crate::problem::{Bound, Problem};
 use crate::solver::{EllPResult, OptimalPoint, Solution, SolutionStatus, SolverResult};
-use crate::standard_form::{Basic, BasicPoint, Nonbasic, NonbasicBound, StandardForm};
+use crate::standard_form::{
+    Basic, BasicPoint, Nonbasic, NonbasicBound, StandardForm, StandardizedProblem,
+};
 use crate::util::EPS;
 
 use log::{debug, trace};
@@ -55,24 +56,22 @@ impl PrimalSimplexSolver {
             }
         };
 
-        debug!("initial primal feasible point:\n{:#?}", phase_2.pt());
-
         Ok(match self.solve_with_initial(&mut phase_2)? {
             SolutionStatus::Optimal => {
-                let opt_pt = OptimalPoint::new(phase_2.feasible_point.into_pt());
+                let opt_pt = OptimalPoint::new(phase_2.point.into_pt());
                 SolverResult::Optimal(Solution::new(phase_2.std_form, opt_pt))
             }
 
-            SolutionStatus::Infeasible => SolverResult::Infeasible,
+            SolutionStatus::Infeasible => panic!("primal phase 2 should never be infeasible"),
             SolutionStatus::Unbounded => SolverResult::Unbounded,
             SolutionStatus::MaxIter => SolverResult::MaxIter { obj: phase_2.obj() },
         })
     }
 
-    pub fn solve_with_initial<P: PrimalProblem>(
-        &self,
-        prob: &mut P,
-    ) -> Result<SolutionStatus, EllPError> {
+    pub fn solve_with_initial<P>(&self, prob: &mut P) -> Result<SolutionStatus, EllPError>
+    where
+        P: StandardizedProblem<FeasiblePoint = PrimalFeasiblePoint>,
+    {
         let (std_form, pt) = prob.unpack();
 
         let pt = &mut **pt;

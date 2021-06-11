@@ -2,11 +2,11 @@
 
 use std::ops::AddAssign;
 
-use super::dual_problem::{DualPhase1, DualPhase2, DualProblem};
+use super::dual_problem::{DualFeasiblePoint, DualPhase1, DualPhase2};
 use crate::error::EllPError;
 use crate::problem::{Bound, Problem};
 use crate::solver::{EllPResult, OptimalPoint, Solution, SolutionStatus, SolverResult};
-use crate::standard_form::{BasicPoint, Nonbasic, NonbasicBound};
+use crate::standard_form::{BasicPoint, Nonbasic, NonbasicBound, StandardizedProblem};
 use crate::util::EPS;
 use crate::PrimalSimplexSolver;
 
@@ -83,35 +83,21 @@ impl DualSimplexSolver {
         })
     }
 
-    pub fn solve_with_initial<P: DualProblem>(
-        &self,
-        prob: &mut P,
-    ) -> Result<SolutionStatus, EllPError> {
+    pub fn solve_with_initial<P>(&self, prob: &mut P) -> Result<SolutionStatus, EllPError>
+    where
+        P: StandardizedProblem<FeasiblePoint = DualFeasiblePoint>,
+    {
         let (std_form, pt) = prob.unpack();
 
         // let (x, N, B) = pt.unpack();
 
         let y = &mut pt.y;
-        let mut d = &std_form.c - std_form.A.tr_mul(y);
+        let d = &mut pt.d;
 
         let pt = &mut pt.point;
         let x = &mut pt.x;
         let N = &mut pt.N;
         let B = &mut pt.B;
-
-        for n in N.as_slice() {
-            let d_i = d[n.index];
-
-            let infeasible = match n.bound {
-                NonbasicBound::Lower => d_i < -EPS,
-                NonbasicBound::Upper => d_i > EPS,
-                NonbasicBound::Free => d_i.abs() > EPS,
-            };
-
-            if infeasible {
-                panic!("initial point of dual phase 2 is dual infeasible");
-            }
-        }
 
         if std_form.rows() == 0 {
             //trivial problem, and would run into errors if we proceed
@@ -149,6 +135,21 @@ impl DualSimplexSolver {
             }
 
             return Ok(SolutionStatus::Optimal);
+        }
+
+        //panics if std_form.rows() == 0
+        for n in N.as_slice() {
+            let d_i = d[n.index];
+
+            let infeasible = match n.bound {
+                NonbasicBound::Lower => d_i < -EPS,
+                NonbasicBound::Upper => d_i > EPS,
+                NonbasicBound::Free => d_i.abs() > EPS,
+            };
+
+            if infeasible {
+                panic!("initial point of dual phase 2 is dual infeasible");
+            }
         }
 
         if B.len() != std_form.rows() {
