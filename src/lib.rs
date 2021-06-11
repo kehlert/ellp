@@ -48,7 +48,7 @@ let primal_solver = PrimalSimplexSolver::default();
 let dual_solver = DualSimplexSolver::default();
 
 let primal_result = primal_solver.solve(prob.clone()).unwrap();
-let dual_result = primal_solver.solve(prob).unwrap();
+let dual_result = dual_solver.solve(prob).unwrap();
 
 if let SolverResult::Optimal(sol) = primal_result {
     println!("primal obj: {}", sol.obj());
