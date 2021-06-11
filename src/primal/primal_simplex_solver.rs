@@ -33,8 +33,6 @@ impl PrimalSimplexSolver {
             None => return Ok(SolverResult::Infeasible),
         };
 
-        println!("PRIMAL PHASE 1:\n{:?}", phase_1);
-
         let mut phase_2: PrimalPhase2 = match self.solve_with_initial(&mut phase_1)? {
             SolutionStatus::Optimal => {
                 let obj = phase_1.obj();

@@ -35,8 +35,6 @@ impl DualSimplexSolver {
             None => return Ok(SolverResult::Infeasible),
         };
 
-        println!("\n---------------------------\nPHASE 1\n---------------------------\n");
-
         let mut phase_2: DualPhase2 = match self.solve_with_initial(&mut phase_1)? {
             SolutionStatus::Optimal => {
                 let obj = phase_1.obj();
@@ -71,14 +69,11 @@ impl DualSimplexSolver {
             }
         };
 
-        println!("\n---------------------------\nPHASE 2\n---------------------------\n");
-
         //debug!("initial dual feasible point:\n{:#?}", phase_2.pt());
 
         Ok(match self.solve_with_initial(&mut phase_2)? {
             SolutionStatus::Optimal => {
                 let opt_pt = OptimalPoint::new(phase_2.point.into_pt());
-                println!("optimal point:\n{:?}", opt_pt);
                 SolverResult::Optimal(Solution::new(phase_2.std_form, opt_pt))
             }
 
@@ -104,14 +99,6 @@ impl DualSimplexSolver {
         let N = &mut pt.N;
         let B = &mut pt.B;
 
-        println!("c:{}", std_form.c);
-        println!("A:{}", std_form.A);
-        println!("y:{}", y);
-        println!("d:{}", d);
-        println!("B:{:?}", B);
-        println!("N:{:?}", N);
-        println!("x: {}", x);
-
         for n in N.as_slice() {
             let d_i = d[n.index];
 
@@ -125,11 +112,6 @@ impl DualSimplexSolver {
                 panic!("initial point of dual phase 2 is dual infeasible");
             }
         }
-
-        println!("std form:\n{}", std_form);
-        println!("x:\n{}", x);
-        println!("B:\n{:?}", B);
-        println!("N:\n{:?}", N);
 
         if std_form.rows() == 0 {
             //trivial problem, and would run into errors if we proceed
@@ -199,32 +181,18 @@ impl DualSimplexSolver {
         let mut c_N =
             nalgebra::DVector::from_iterator(N.len(), N.iter().map(|i| std_form.c[i.index]));
 
-        println!("A:{}", std_form.A);
-        println!("b:{}", std_form.b);
-        println!("c:{}", std_form.c);
-        println!("bounds:\n{:?}", std_form.bounds);
-        println!("A_N:{}", A_N);
-
         let mut iter = 0u64;
         let mut obj = std_form.dual_obj(y, &d);
 
         let mut zero_vector = nalgebra::DVector::zeros(std_form.rows());
 
         loop {
-            println!("ITER: {}", iter);
-
             if iter >= self.max_iter {
                 debug!("reached max iterations");
                 return Ok(SolutionStatus::MaxIter);
             }
 
             iter += 1;
-
-            println!("y:{}", y);
-            println!("d:{}", d);
-            println!("B:{:?}", B);
-            println!("N:{:?}", N);
-            println!("x: {}", x);
 
             //TODO check that objective is nondecreasing
             //could do an online update of the objective
@@ -349,12 +317,7 @@ impl DualSimplexSolver {
             assert!(alpha_q.len() == B.len());
 
             for (i, b) in B.iter().enumerate() {
-                println!(
-                    "x[{}]={}, {}, {}",
-                    b.index, x[b.index], theta_primal, alpha_q[i]
-                );
                 x[b.index] -= theta_primal * alpha_q[i];
-                println!("after: {}", x[b.index]);
             }
 
             x[entering.index] += theta_primal;
@@ -364,12 +327,6 @@ impl DualSimplexSolver {
             debug!("delta: {}", delta);
             debug!("theta_dual: {}", theta_dual);
             debug!("theta_primal: {}", theta_primal);
-
-            debug!("obj after: {}", obj);
-
-            debug!("obj after2: {}", std_form.dual_obj(y, &d));
-
-            debug!("x after: {}", x);
 
             std::mem::swap(&mut B[leaving_index].index, &mut N[entering_index].index);
             N[entering_index].bound = nonbasic_bound;

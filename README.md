@@ -12,60 +12,60 @@ Here is example code that sets up a linear program, and then solves it with both
 
 
 ```rust
-    use ellp::*;
+use ellp::*;
 
-    let mut prob = Problem::new();
+let mut prob = Problem::new();
 
-    let x1 = prob
-        .add_var(2., Bound::TwoSided(-1., 1.), Some("x1".to_string()))
-        .unwrap();
+let x1 = prob
+    .add_var(2., Bound::TwoSided(-1., 1.), Some("x1".to_string()))
+    .unwrap();
 
-    let x2 = prob
-        .add_var(10., Bound::Upper(6.), Some("x2".to_string()))
-        .unwrap();
+let x2 = prob
+    .add_var(10., Bound::Upper(6.), Some("x2".to_string()))
+    .unwrap();
 
-    let x3 = prob
-        .add_var(0., Bound::Lower(0.), Some("x3".to_string()))
-        .unwrap();
+let x3 = prob
+    .add_var(0., Bound::Lower(0.), Some("x3".to_string()))
+    .unwrap();
 
-    let x4 = prob
-        .add_var(1., Bound::Fixed(0.), Some("x4".to_string()))
-        .unwrap();
+let x4 = prob
+    .add_var(1., Bound::Fixed(0.), Some("x4".to_string()))
+    .unwrap();
 
-    let x5 = prob
-        .add_var(0., Bound::Free, Some("x5".to_string()))
-        .unwrap();
+let x5 = prob
+    .add_var(0., Bound::Free, Some("x5".to_string()))
+    .unwrap();
 
-    prob.add_constraint(vec![(x1, 2.5), (x2, 3.5)], ConstraintOp::Gte, 5.)
-        .unwrap();
+prob.add_constraint(vec![(x1, 2.5), (x2, 3.5)], ConstraintOp::Gte, 5.)
+    .unwrap();
 
-    prob.add_constraint(vec![(x2, 2.5), (x1, 4.5)], ConstraintOp::Lte, 1.)
-        .unwrap();
+prob.add_constraint(vec![(x2, 2.5), (x1, 4.5)], ConstraintOp::Lte, 1.)
+    .unwrap();
 
-    prob.add_constraint(vec![(x3, -1.), (x4, -3.), (x5, -4.)], ConstraintOp::Eq, 2.)
-        .unwrap();
+prob.add_constraint(vec![(x3, -1.), (x4, -3.), (x5, -4.)], ConstraintOp::Eq, 2.)
+    .unwrap();
 
-    println!("{}", prob);
+println!("{}", prob);
 
-    let primal_solver = PrimalSimplexSolver::default();
-    let dual_solver = DualSimplexSolver::default();
+let primal_solver = PrimalSimplexSolver::default();
+let dual_solver = DualSimplexSolver::default();
 
-    let primal_result = primal_solver.solve(&prob).unwrap();
-    let dual_result = dual_solver.solve(&prob).unwrap();
+let primal_result = primal_solver.solve(prob.clone()).unwrap();
+let dual_result = dual_solver.solve(prob).unwrap();
 
-    if let SolverResult::Optimal(sol) = primal_result {
-        println!("primal obj: {}", sol.obj());
-        println!("primal opt point: {}", sol.x());
-    } else {
-        panic!("should have an optimal point");
-    }
+if let SolverResult::Optimal(sol) = primal_result {
+    println!("primal obj: {}", sol.obj());
+    println!("primal opt point: {}", sol.x());
+} else {
+    panic!("should have an optimal point");
+}
 
-    if let SolverResult::Optimal(sol) = dual_result {
-        println!("dual obj: {}", sol.obj());
-        println!("dual opt point: {}", sol.x());
-    } else {
-        panic!("should have an optimal point");
-    }
+if let SolverResult::Optimal(sol) = dual_result {
+    println!("dual obj: {}", sol.obj());
+    println!("dual opt point: {}", sol.x());
+} else {
+    panic!("should have an optimal point");
+}
 ```
 
 The output is

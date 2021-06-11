@@ -1,6 +1,6 @@
 #![allow(non_snake_case)]
 
-use crate::problem::{Bound, ConstraintOp, Problem, VariableId};
+use crate::problem::{Bound, ConstraintOp, Problem};
 use crate::standard_form::{Basic, BasicPoint, Nonbasic, NonbasicBound, Point, StandardForm};
 use crate::util::EPS;
 
@@ -117,8 +117,6 @@ impl DualProblem for DualPhase2 {
 
 impl std::convert::From<Problem> for Option<DualPhase1> {
     fn from(prob: Problem) -> Self {
-        println!("orig prob:\n{}", prob);
-
         let orig_std_form: StandardForm = match prob.into() {
             Some(std_form) => std_form,
             None => return None,
@@ -162,8 +160,6 @@ impl std::convert::From<Problem> for Option<DualPhase1> {
                 .unwrap();
         }
 
-        println!("{}", phase_1_prob);
-
         let std_form: StandardForm = match phase_1_prob.into() {
             Some(std_form) => std_form,
             None => return None,
@@ -192,12 +188,6 @@ impl std::convert::From<Problem> for Option<DualPhase1> {
 
         let c_B = nalgebra::DVector::from_iterator(B.len(), B.iter().map(|i| std_form.c[i.index]));
         let A_B = std_form.A.select_columns(B.iter().map(|b| &b.index));
-
-        println!("c:{}", std_form.c);
-        println!("A:{}", std_form.A);
-        println!("A_B:{}", A_B);
-        println!("B:{:?}", B);
-
         let A_B_lu = A_B.lu();
 
         if !B.is_empty() {
@@ -207,8 +197,6 @@ impl std::convert::From<Problem> for Option<DualPhase1> {
             A_B_lu.p().inv_permute_rows(&mut y);
 
             let d = &std_form.c - std_form.A.tr_mul(&y);
-            println!("y: {}", y);
-            println!("d: {}", d);
 
             let mut x = nalgebra::DVector::zeros(std_form.bounds.len());
 
@@ -252,15 +240,6 @@ impl std::convert::From<Problem> for Option<DualPhase1> {
                 x[i.index] = *val;
             }
 
-            println!("N:{:?}", N);
-
-            println!("{:?}", std_form.bounds);
-            println!("y: {}", y);
-            println!("x: {}", x);
-            println!("d: {}", d);
-            println!("Ax:{}", &std_form.A * &x);
-            println!("b:{}", std_form.b);
-
             let point = DualFeasiblePoint {
                 y,
                 point: Point { x, N, B },
@@ -286,9 +265,6 @@ impl std::convert::From<Problem> for Option<DualPhase1> {
                     _ => panic!("bounds should always be fixed or two-sided"),
                 }
             }
-
-            println!("HEREERERE: {}", x);
-            println!("N: {:?}", N);
 
             let point = DualFeasiblePoint {
                 y: empty_vec,
@@ -365,8 +341,6 @@ impl std::convert::From<DualPhase1> for DualPhase2 {
                             Bound::Fixed(val) => (*val, NonbasicBound::Lower),
                         };
 
-                        println!("i: {}, x_i: {}, d_i: {}", i, x_i, d_i);
-
                         Some((x_i, Nonbasic::new(i, bound)))
                     } else {
                         None
@@ -397,7 +371,7 @@ impl std::convert::From<DualPhase1> for DualPhase2 {
                 point: Point { x, N, B },
             };
 
-            DualPhase2 { point, std_form }
+            DualPhase2 { std_form, point }
         } else {
             let empty_vec = nalgebra::DVector::zeros(0);
             let number_nonbasic = std_form.A.ncols();
@@ -447,7 +421,7 @@ impl std::convert::From<DualPhase1> for DualPhase2 {
                 point: Point { x: x_N, N, B },
             };
 
-            DualPhase2 { point, std_form }
+            DualPhase2 { std_form, point }
         }
     }
 }
