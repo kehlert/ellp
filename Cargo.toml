@@ -1,6 +1,6 @@
 [package]
 name = "ellp"
-version = "0.1.0"
+version = "0.1.1"
 authors = ["Kurt Ehlert <kwehlert@gmail.com>"]
 edition = "2018"
 license = "MIT"
