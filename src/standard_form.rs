@@ -2,9 +2,16 @@
 
 use crate::problem::{Bound, ConstraintOp, Problem};
 use crate::util::EPS;
+
 use log::debug;
-use nalgebra::ComplexField;
 use std::collections::HashMap;
+
+pub trait StandardizedProblem {
+    type FeasiblePoint;
+
+    fn obj(&self) -> f64;
+    fn unpack(&mut self) -> (&StandardForm, &mut Self::FeasiblePoint);
+}
 
 pub trait BasicPoint: std::ops::Deref<Target = Point> + std::ops::DerefMut<Target = Point> {
     fn into_pt(self) -> Point;
@@ -39,7 +46,6 @@ impl StandardForm {
 
     #[inline]
     pub fn obj(&self, x: &nalgebra::DVector<f64>) -> f64 {
-        println!("{}, {}", self.c, x);
         self.c.dot(x)
     }
 
@@ -47,8 +53,6 @@ impl StandardForm {
         assert!(d.len() == self.bounds.len());
 
         let mut obj = self.b.dot(y);
-
-        println!("y^T b: {}", obj);
 
         for (i, bound) in self.bounds.iter().enumerate() {
             match bound {
@@ -76,10 +80,10 @@ impl std::convert::From<Problem> for Option<StandardForm> {
         debug!("converting problem to standard form");
 
         let n = prob.variables.len();
-        let m = prob.constraints().len();
+        let m = prob.constraints.len();
 
         let num_slack_vars = prob
-            .constraints()
+            .constraints
             .iter()
             .map(|constraint| match constraint.op {
                 ConstraintOp::Lte | ConstraintOp::Gte => 1,
@@ -105,7 +109,7 @@ impl std::convert::From<Problem> for Option<StandardForm> {
 
         let mut cur_slack_col = A.ncols().saturating_sub(1);
 
-        for (i, constraint) in prob.constraints().iter().enumerate() {
+        for (i, constraint) in prob.constraints.iter().enumerate() {
             b[i] = constraint.rhs;
 
             if constraint.coeffs.is_empty() && b[i] != 0. {
@@ -129,11 +133,6 @@ impl std::convert::From<Problem> for Option<StandardForm> {
 
         assert!(cur_slack_col == n.saturating_sub(1));
 
-        println!("INITIAL");
-
-        println!("A: {}", A);
-        println!("b: {}", b);
-
         //remove redundant rows
         let A_qr = A.transpose().col_piv_qr();
         let mut R = A_qr.r();
@@ -155,7 +154,6 @@ impl std::convert::From<Problem> for Option<StandardForm> {
         let is_trivial = !R.is_empty() && R[(0, 0)].abs() < EPS && b[0].abs() < EPS;
 
         if !is_trivial {
-            println!("{:?}", R.tr_solve_upper_triangular(&b));
             R.tr_solve_upper_triangular(&b)?;
         }
 

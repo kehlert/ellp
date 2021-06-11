@@ -103,10 +103,6 @@ impl Problem {
         }
     }
 
-    pub fn constraints(&self) -> &[Constraint] {
-        self.constraints.as_slice()
-    }
-
     pub fn is_feasible(&self, x: &[f64]) -> bool {
         if x.len() != self.variables.len() {
             return false;
@@ -371,8 +367,7 @@ mod tests {
     #[test]
     fn add_var() {
         let mut prob = Problem::new();
-        let var_id = prob
-            .add_var(1., Bound::Free, Some("x".to_string()))
+        prob.add_var(1., Bound::Free, Some("x".to_string()))
             .unwrap();
         assert_eq!(prob.variables[0].name.as_ref().unwrap(), "x");
     }
@@ -380,8 +375,7 @@ mod tests {
     #[test]
     fn add_var_with_bounds() {
         let mut prob = Problem::new();
-        let var_id = prob
-            .add_var(1., Bound::TwoSided(1., 2.), Some("x".to_string()))
+        prob.add_var(1., Bound::TwoSided(1., 2.), Some("x".to_string()))
             .unwrap();
         let var = &prob.variables[0];
         assert_eq!(var.bound, Bound::TwoSided(1., 2.));
