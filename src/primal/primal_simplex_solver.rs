@@ -7,9 +7,9 @@ use crate::solver::{EllPResult, OptimalPoint, Solution, SolutionStatus, SolverRe
 use crate::standard_form::{
     Basic, BasicPoint, Nonbasic, NonbasicBound, StandardForm, StandardizedProblem,
 };
-use crate::util::EPS;
+use crate::util::{EPS, ITER_WIDTH};
 
-use log::{debug, trace};
+use log::{debug, info, trace};
 
 pub struct PrimalSimplexSolver {
     max_iter: u64,
@@ -34,37 +34,60 @@ impl PrimalSimplexSolver {
             None => return Ok(SolverResult::Infeasible),
         };
 
+        info!("PRIMAL PHASE 1");
+
         let mut phase_2: PrimalPhase2 = match self.solve_with_initial(&mut phase_1)? {
             SolutionStatus::Optimal => {
                 let obj = phase_1.obj();
-
                 assert!(obj > -EPS);
 
                 if obj < EPS {
-                    debug!("found feasible point");
+                    info!("found feasible point");
                     phase_1.into()
                 } else {
+                    info!("problem is infeasible");
                     return Ok(SolverResult::Infeasible);
                 }
             }
 
-            SolutionStatus::Infeasible => return Ok(SolverResult::Infeasible),
-            SolutionStatus::Unbounded => panic!("phase 1 problem is never unbounded"),
+            SolutionStatus::Infeasible => {
+                info!("problem is infeasible");
+                return Ok(SolverResult::Infeasible);
+            }
+
+            SolutionStatus::Unbounded => panic!("primal phase 1 should never be unbounded"),
+
             SolutionStatus::MaxIter => {
-                debug!("phase 1 reached maximum iterations");
+                info!("reached maximum iterations");
                 return Ok(SolverResult::MaxIter { obj: f64::INFINITY });
             }
         };
 
+        info!("PRIMAL PHASE 2");
+
         Ok(match self.solve_with_initial(&mut phase_2)? {
             SolutionStatus::Optimal => {
                 let opt_pt = OptimalPoint::new(phase_2.point.into_pt());
+
+                info!(
+                    "found optimal point with objective value {}",
+                    phase_2.std_form.obj(&opt_pt.x)
+                );
+
                 SolverResult::Optimal(Solution::new(phase_2.std_form, opt_pt))
             }
 
             SolutionStatus::Infeasible => panic!("primal phase 2 should never be infeasible"),
-            SolutionStatus::Unbounded => SolverResult::Unbounded,
-            SolutionStatus::MaxIter => SolverResult::MaxIter { obj: phase_2.obj() },
+
+            SolutionStatus::Unbounded => {
+                info!("problem is unbounded");
+                SolverResult::Unbounded
+            }
+
+            SolutionStatus::MaxIter => {
+                info!("reached maximum iterations");
+                SolverResult::MaxIter { obj: phase_2.obj() }
+            }
         })
     }
 
@@ -79,9 +102,17 @@ impl PrimalSimplexSolver {
         let N = &mut pt.N;
         let B = &mut pt.B;
 
+        info!(
+            "solving problem with {} variables and {} constraints",
+            std_form.cols(),
+            std_form.rows()
+        );
+
         trace!("c: {}", std_form.c);
         trace!("A: {}", std_form.A);
         trace!("b: {}", std_form.b);
+
+        info!("Iteration  |  Objective");
 
         if std_form.rows() == 0 {
             //trivial problem, and would run into errors if we proceed
@@ -115,6 +146,8 @@ impl PrimalSimplexSolver {
                     *x_i = 0.; //can set to anything, but zero seems reasonable
                 }
             }
+
+            info!("{:it$}  |  {:.6E}", 0, std_form.obj(x), it = ITER_WIDTH,);
 
             return Ok(SolutionStatus::Optimal);
         }
@@ -152,11 +185,13 @@ impl PrimalSimplexSolver {
         let mut c_N =
             nalgebra::DVector::from_iterator(N.len(), N.iter().map(|i| std_form.c[i.index]));
 
-        let mut iter = 0u64;
+        let mut iter = 1u64;
 
         //TODO set max iterations for the solver
         loop {
-            if iter >= self.max_iter {
+            info!("{:it$}  |  {:.8E}", iter, std_form.obj(x), it = ITER_WIDTH,);
+
+            if iter > self.max_iter {
                 debug!("reached max iterations");
                 return Ok(SolutionStatus::MaxIter);
             }
@@ -164,7 +199,6 @@ impl PrimalSimplexSolver {
             iter += 1;
 
             //TODO check that objective is nonincreasing
-            debug!("obj: {}", std_form.obj(&x));
 
             //TODO avoid clone, and update LU decomp instead of recomputing it
             let lu_decomp = A_B.clone().lu();
