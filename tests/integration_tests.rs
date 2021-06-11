@@ -12,7 +12,7 @@ pub fn setup_logger(log_level: log::LevelFilter) {
         .warn(Color::BrightYellow)
         .error(Color::BrightRed);
 
-    fern::Dispatch::new()
+    let _ = fern::Dispatch::new()
         .format(move |out, message, record| {
             out.finish(format_args!(
                 "{} | {:5} | {}",
@@ -23,8 +23,7 @@ pub fn setup_logger(log_level: log::LevelFilter) {
         })
         .level(log_level)
         .chain(std::io::stdout())
-        .apply()
-        .unwrap();
+        .apply();
 }
 
 macro_rules! generate_tests {
@@ -33,7 +32,12 @@ macro_rules! generate_tests {
             $(
                 #[test]
                 fn  [<$solver_name _ $problem>]() {
-                    //setup_logger(log::LevelFilter::Trace);
+                    if let Ok(val) = std::env::var("LOG") {
+                        if val == "1" {
+                            setup_logger(log::LevelFilter::Info);
+                        }
+                    }
+
                     let test_prob = problems::$problem();
                     let solver = $solver;
                     let result = solver.solve(test_prob.prob).unwrap();

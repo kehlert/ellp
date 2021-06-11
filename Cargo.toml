@@ -7,7 +7,7 @@ license = "MIT"
 documentation = "https://docs.rs/ellp/"
 description = "Linear programming library that provides primal and dual simplex solvers."
 repository = "https://github.com/kehlert/ellp"
-keywords = ["linear", "programming", "optimization", "simplex", "solver"]
+keywords = ["linear-programming", "optimization", "simplex", "primal", "dual"]
 categories = ["mathematics", "science"]
 
 [dependencies]

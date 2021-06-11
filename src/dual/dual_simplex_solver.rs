@@ -7,10 +7,10 @@ use crate::error::EllPError;
 use crate::problem::{Bound, Problem};
 use crate::solver::{EllPResult, OptimalPoint, Solution, SolutionStatus, SolverResult};
 use crate::standard_form::{BasicPoint, Nonbasic, NonbasicBound, StandardizedProblem};
-use crate::util::EPS;
+use crate::util::{EPS, ITER_WIDTH};
 use crate::PrimalSimplexSolver;
 
-use log::debug;
+use log::{debug, info};
 
 pub struct DualSimplexSolver {
     max_iter: u64,
@@ -35,6 +35,8 @@ impl DualSimplexSolver {
             None => return Ok(SolverResult::Infeasible),
         };
 
+        info!("DUAL PHASE 1");
+
         let mut phase_2: DualPhase2 = match self.solve_with_initial(&mut phase_1)? {
             SolutionStatus::Optimal => {
                 let obj = phase_1.obj();
@@ -42,9 +44,14 @@ impl DualSimplexSolver {
                 assert!(obj < EPS);
 
                 if obj > -EPS {
-                    debug!("found feasible point");
+                    info!("found feasible point");
                     phase_1.into()
                 } else {
+                    info!(
+                        "dual problem is infeasible, using primal solver to determine \
+                         if problem is infeasible or unbounded"
+                    );
+
                     let primal_solver = PrimalSimplexSolver::default();
                     let result = primal_solver.solve(phase_1.into_orig_prob())?;
 
@@ -59,27 +66,44 @@ impl DualSimplexSolver {
                 }
             }
 
-            SolutionStatus::Infeasible => return Ok(SolverResult::Infeasible),
+            SolutionStatus::Infeasible => {
+                info!("problem is infeasible");
+                return Ok(SolverResult::Infeasible);
+            }
 
-            SolutionStatus::Unbounded => panic!("phase 1 should never be unbounded"),
+            SolutionStatus::Unbounded => panic!("dual phase 1 should never be unbounded"),
 
             SolutionStatus::MaxIter => {
-                debug!("phase 1 reached maximum iterations");
+                info!("reached maximum iterations");
                 return Ok(SolverResult::MaxIter { obj: f64::INFINITY });
             }
         };
 
-        //debug!("initial dual feasible point:\n{:#?}", phase_2.pt());
+        info!("DUAL PHASE 2");
 
         Ok(match self.solve_with_initial(&mut phase_2)? {
             SolutionStatus::Optimal => {
                 let opt_pt = OptimalPoint::new(phase_2.point.into_pt());
+
+                info!(
+                    "found optimal point with objective value {}",
+                    phase_2.std_form.obj(&opt_pt.x)
+                );
+
                 SolverResult::Optimal(Solution::new(phase_2.std_form, opt_pt))
             }
 
-            SolutionStatus::Infeasible => SolverResult::Infeasible,
-            SolutionStatus::Unbounded => SolverResult::Unbounded,
-            SolutionStatus::MaxIter => SolverResult::MaxIter { obj: phase_2.obj() },
+            SolutionStatus::Infeasible => {
+                info!("problem is infeasible");
+                SolverResult::Infeasible
+            }
+
+            SolutionStatus::Unbounded => panic!("dual phase 2 should never return unbounded"),
+
+            SolutionStatus::MaxIter => {
+                info!("reached maximum iterations");
+                SolverResult::MaxIter { obj: phase_2.obj() }
+            }
         })
     }
 
@@ -89,7 +113,11 @@ impl DualSimplexSolver {
     {
         let (std_form, pt) = prob.unpack();
 
-        // let (x, N, B) = pt.unpack();
+        info!(
+            "solving problem with {} variables and {} constraints",
+            std_form.cols(),
+            std_form.rows()
+        );
 
         let y = &mut pt.y;
         let d = &mut pt.d;
@@ -98,6 +126,8 @@ impl DualSimplexSolver {
         let x = &mut pt.x;
         let N = &mut pt.N;
         let B = &mut pt.B;
+
+        info!("Iteration  |  Objective");
 
         if std_form.rows() == 0 {
             //trivial problem, and would run into errors if we proceed
@@ -133,6 +163,8 @@ impl DualSimplexSolver {
                     *x_i = 0.; //can set to anything, but zero seems reasonable
                 }
             }
+
+            info!("{:it$}  |  {:.6E}", 0, std_form.obj(x), it = ITER_WIDTH,);
 
             return Ok(SolutionStatus::Optimal);
         }
@@ -188,6 +220,8 @@ impl DualSimplexSolver {
         let mut zero_vector = nalgebra::DVector::zeros(std_form.rows());
 
         loop {
+            info!("{:it$}  |  {:.8E}", iter, obj, it = ITER_WIDTH,);
+
             if iter >= self.max_iter {
                 debug!("reached max iterations");
                 return Ok(SolutionStatus::MaxIter);
@@ -196,8 +230,6 @@ impl DualSimplexSolver {
             iter += 1;
 
             //TODO check that objective is nondecreasing
-            //could do an online update of the objective
-            debug!("obj: {}", obj);
 
             let leaving = B.iter().enumerate().find_map(|(i, B_i)| {
                 let x_i = x[B_i.index];
@@ -237,7 +269,7 @@ impl DualSimplexSolver {
                 bound_change.map(|(delta, nonbasic_bound)| (i, delta, nonbasic_bound))
             });
 
-            debug!("leaving variable: {:?}", leaving);
+            //debug!("leaving variable: {:?}", leaving);
 
             //TODO avoid the clone and update LU decomp instead
             let lu = A_B.clone().lu();
@@ -253,15 +285,12 @@ impl DualSimplexSolver {
 
             let mut rho = lu.l().tr_solve_lower_triangular(&rho_tilde).unwrap();
             lu.p().inv_permute_rows(&mut rho);
-            debug!("rho:{}", rho);
 
             let mut alpha = A_N.tr_mul(&rho);
 
             if delta < 0. {
                 alpha.neg_mut();
             }
-
-            debug!("alpha:{}", alpha);
 
             assert!(alpha.len() == N.len());
 
@@ -296,12 +325,7 @@ impl DualSimplexSolver {
             let leaving = &B[leaving_index];
             let entering = &N[entering_index];
 
-            debug!("leaving: {:?}", leaving);
-            debug!("entering: {:?}", entering);
-
             let alpha_q = lu.solve(&std_form.A.column(entering.index)).unwrap();
-
-            debug!("alpha_q: {}", alpha_q);
 
             d[leaving.index] = -theta_dual;
 
@@ -325,9 +349,9 @@ impl DualSimplexSolver {
 
             obj += theta_dual * delta;
 
-            debug!("delta: {}", delta);
-            debug!("theta_dual: {}", theta_dual);
-            debug!("theta_primal: {}", theta_primal);
+            // debug!("delta: {}", delta);
+            // debug!("theta_dual: {}", theta_dual);
+            // debug!("theta_primal: {}", theta_primal);
 
             std::mem::swap(&mut B[leaving_index].index, &mut N[entering_index].index);
             N[entering_index].bound = nonbasic_bound;
@@ -341,9 +365,6 @@ impl DualSimplexSolver {
             }
 
             std::mem::swap(&mut c_B[leaving_index], &mut c_N[entering_index]);
-
-            debug!("B after: {:?}", B);
-            debug!("N after: {:?}", N);
         }
     }
 }
