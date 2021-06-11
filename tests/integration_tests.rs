@@ -35,6 +35,7 @@ macro_rules! generate_tests {
                 fn  [<$solver_name _ $problem>]() {
                     //setup_logger(log::LevelFilter::Trace);
                     let test_prob = problems::$problem();
+                    println!("{}", test_prob.prob);
                     let solver = $solver;
                     let result = solver.solve(test_prob.prob).unwrap();
                     (test_prob.check_result)(&result)
