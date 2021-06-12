@@ -106,16 +106,15 @@ dual opt point:
 If the problem is infeasible or unbounded, then `solve` will return [`SolverResult::Infeasible`] or [`SolverResult::Unbounded`], respectively.
 */
 
-mod dual;
 mod error;
-mod primal;
 pub mod problem;
 pub mod solver;
+mod solvers;
 mod standard_form;
 mod util;
 
-pub use crate::dual::dual_simplex_solver::DualSimplexSolver;
 pub use crate::error::EllPError;
-pub use crate::primal::primal_simplex_solver::PrimalSimplexSolver;
 pub use crate::problem::{Bound, Constraint, ConstraintOp, Problem, Variable};
 pub use crate::solver::{EllPResult, SolverResult};
+pub use crate::solvers::dual::dual_simplex_solver::DualSimplexSolver;
+pub use crate::solvers::primal::primal_simplex_solver::PrimalSimplexSolver;

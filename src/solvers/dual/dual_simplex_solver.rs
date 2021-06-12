@@ -6,6 +6,7 @@ use super::dual_problem::{DualFeasiblePoint, DualPhase1, DualPhase2};
 use crate::error::EllPError;
 use crate::problem::{Bound, Problem};
 use crate::solver::{EllPResult, OptimalPoint, Solution, SolutionStatus, SolverResult};
+use crate::solvers::trivial::solve_trivial_problem;
 use crate::standard_form::{BasicPoint, Nonbasic, NonbasicBound, StandardizedProblem};
 use crate::util::{EPS, ITER_WIDTH};
 use crate::PrimalSimplexSolver;
@@ -131,42 +132,8 @@ impl DualSimplexSolver {
 
         if std_form.rows() == 0 {
             //trivial problem, and would run into errors if we proceed
-            assert_eq!(std_form.c.len(), std_form.bounds.len());
-            assert_eq!(std_form.c.len(), x.len());
-
             assert!(B.is_empty());
-            N.clear();
-
-            for (i, ((x_i, &c_i), bound)) in x
-                .iter_mut()
-                .zip(&std_form.c)
-                .zip(&std_form.bounds)
-                .enumerate()
-            {
-                if c_i > 0. {
-                    match *bound {
-                        Bound::Free | Bound::Upper(..) => return Ok(SolutionStatus::Infeasible), //dual unbounded
-                        Bound::Lower(lb) | Bound::TwoSided(lb, ..) | Bound::Fixed(lb) => {
-                            *x_i = lb;
-                            N.push(Nonbasic::new(i, NonbasicBound::Lower));
-                        }
-                    }
-                } else if c_i < 0. {
-                    match *bound {
-                        Bound::Free | Bound::Lower(..) => return Ok(SolutionStatus::Infeasible), //dual unbounded
-                        Bound::Upper(ub) | Bound::TwoSided(.., ub) | Bound::Fixed(ub) => {
-                            *x_i = ub;
-                            N.push(Nonbasic::new(i, NonbasicBound::Upper));
-                        }
-                    }
-                } else {
-                    *x_i = 0.; //can set to anything, but zero seems reasonable
-                }
-            }
-
-            info!("{:it$}  |  {:.6E}", 0, std_form.obj(x), it = ITER_WIDTH,);
-
-            return Ok(SolutionStatus::Optimal);
+            return Ok(solve_trivial_problem(std_form, x, N, true));
         }
 
         //panics if std_form.rows() == 0
