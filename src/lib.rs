@@ -6,6 +6,9 @@ pub mod solver;
 mod standard_form;
 mod util;
 
+#[cfg(feature = "mps")]
+mod parse_mps;
+
 pub use crate::dual::dual_simplex_solver::DualSimplexSolver;
 pub use crate::error::EllPError;
 pub use crate::primal::primal_simplex_solver::PrimalSimplexSolver;
