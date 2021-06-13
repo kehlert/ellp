@@ -1,12 +1,13 @@
 [package]
 name = "ellp"
-version = "0.1.0"
+version = "0.1.1"
 authors = ["Kurt Ehlert <kwehlert@gmail.com>"]
 edition = "2018"
 license = "MIT"
+documentation = "https://docs.rs/ellp/"
 description = "Linear programming library that provides primal and dual simplex solvers."
 repository = "https://github.com/kehlert/ellp"
-keywords = ["linear", "programming", "optimization", "simplex", "solver"]
+keywords = ["linear-programming", "optimization", "simplex", "primal", "dual"]
 categories = ["mathematics", "science"]
 
 [dependencies]

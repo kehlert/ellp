@@ -28,7 +28,6 @@ impl Problem {
         name: Option<String>,
     ) -> Result<VariableId, EllPError> {
         let id = VariableId(self.variables.len());
-        println!("{:?}, {:?}", name, id);
         self.add_var_with_id(obj_coeff, bound, id, name)?;
         Ok(id)
     }
@@ -104,10 +103,6 @@ impl Problem {
                 Ok(())
             }
         }
-    }
-
-    pub fn constraints(&self) -> &[Constraint] {
-        self.constraints.as_slice()
     }
 
     pub fn is_feasible(&self, x: &[f64]) -> bool {
@@ -204,37 +199,13 @@ pub enum Bound {
 impl Bound {
     fn display(&self, f: &mut std::fmt::Formatter, var: &Variable) -> std::fmt::Result {
         match self {
-            Bound::Free => write!(
-                f,
-                "-{inf} {lte} {} {lte} {inf}",
-                var,
-                inf = INF_STR,
-                lte = LTE_STR
-            ),
-
-            Bound::Lower(lb) => write!(
-                f,
-                "{} {lte} {} {lte} {inf}",
-                lb,
-                var,
-                inf = INF_STR,
-                lte = LTE_STR
-            ),
-
-            Bound::Upper(ub) => write!(
-                f,
-                "-{inf} {lte} {} {lte} {}",
-                var,
-                ub,
-                inf = INF_STR,
-                lte = LTE_STR
-            ),
-
+            Bound::Free => write!(f, "{} free", var),
+            Bound::Lower(lb) => write!(f, "{} {gte} {}", var, lb, gte = GTE_STR),
+            Bound::Upper(ub) => write!(f, "{} {lte} {}", var, ub, lte = LTE_STR),
             Bound::TwoSided(lb, ub) => {
                 write!(f, "{} {lte} {} {lte} {}", lb, var, ub, lte = LTE_STR)
             }
-
-            Bound::Fixed(val) => write!(f, "{} {eq} {}", var, val, eq = LTE_STR),
+            Bound::Fixed(val) => write!(f, "{} {eq} {}", var, val, eq = EQ_STR),
         }
     }
 }
@@ -346,7 +317,7 @@ impl std::fmt::Display for Problem {
 
             write!(
                 f,
-                "{} {}{} ",
+                "{} {} {} ",
                 if var.obj_coeff > 0. { "+" } else { "-" },
                 var.obj_coeff.abs(),
                 var
@@ -363,10 +334,8 @@ impl std::fmt::Display for Problem {
         writeln!(f, "\nwith the bounds")?;
 
         for var in &self.variables {
-            if !matches!(var.bound, Bound::Free) {
-                var.bound.display(f, var)?;
-                writeln!(f)?;
-            }
+            var.bound.display(f, var)?;
+            writeln!(f)?;
         }
 
         Ok(())
@@ -400,8 +369,7 @@ mod tests {
     #[test]
     fn add_var() {
         let mut prob = Problem::new();
-        let var_id = prob
-            .add_var(1., Bound::Free, Some("x".to_string()))
+        prob.add_var(1., Bound::Free, Some("x".to_string()))
             .unwrap();
         assert_eq!(prob.variables[0].name.as_ref().unwrap(), "x");
     }
@@ -409,8 +377,7 @@ mod tests {
     #[test]
     fn add_var_with_bounds() {
         let mut prob = Problem::new();
-        let var_id = prob
-            .add_var(1., Bound::TwoSided(1., 2.), Some("x".to_string()))
+        prob.add_var(1., Bound::TwoSided(1., 2.), Some("x".to_string()))
             .unwrap();
         let var = &prob.variables[0];
         assert_eq!(var.bound, Bound::TwoSided(1., 2.));

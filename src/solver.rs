@@ -1,6 +1,4 @@
-use crate::dual::dual_problem::DualPhase2;
 use crate::error::EllPError;
-use crate::problem::Constraint;
 use crate::standard_form::{BasicPoint, Point, StandardForm};
 
 pub type EllPResult = Result<SolverResult, EllPError>;
@@ -39,10 +37,6 @@ impl Solution {
 
     pub fn x(&self) -> nalgebra::DVectorSlice<f64> {
         self.std_form.extract_solution(&self.point)
-    }
-
-    pub fn add_constraint(self, _constraint: Constraint) -> DualPhase2 {
-        todo!()
     }
 }
 
