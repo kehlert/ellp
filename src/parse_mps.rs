@@ -1,4 +1,3 @@
-use crate::error::EllPError;
 use crate::problem::{Bound, Constraint, ConstraintOp, Problem, Variable};
 
 use nom::branch::alt;
@@ -7,24 +6,68 @@ use nom::character::complete::{char, multispace0, multispace1, satisfy, space0, 
 use nom::character::{is_alphanumeric, is_newline};
 use nom::multi::{fold_many1, separated_list0};
 use nom::number::complete::double;
+use nom::Finish;
 use nom::IResult;
 
 use log::error;
+use thiserror::Error;
 
 use std::collections::HashMap;
 
-impl std::convert::TryFrom<&[u8]> for Problem {
-    type Error = EllPError;
+type Rows<'a> = HashMap<&'a [u8], Row<'a>>;
+type Cols<'a> = HashMap<&'a [u8], Col>;
 
-    fn try_from(mps: &[u8]) -> Result<Self, Self::Error> {
-        let (_, prob) = parse_mps(mps).unwrap(); //TODO map the error
-        Ok(prob)
+#[derive(Error, Debug)]
+#[error("MPS parsing error. {msg}\n{code:?}\ninput: {input:?}")]
+pub struct MpsParsingError<'a> {
+    msg: String,
+    input: Option<std::borrow::Cow<'a, str>>,
+    code: Option<nom::error::ErrorKind>,
+}
+
+#[allow(dead_code)]
+pub fn parse_mps(mps: &[u8]) -> Result<Problem, MpsParsingError> {
+    match parse_mps_impl(mps).finish() {
+        Ok((_i, (rows, cols))) => {
+            let mut prob = Problem::new();
+            let mut var_ids = HashMap::new();
+
+            for (var_name_bytes, col) in cols {
+                let var_name = String::from_utf8(var_name_bytes.to_owned()).map_err(|err| {
+                    MpsParsingError {
+                        msg: format!("invalid variable name: {}", err),
+                        input: Some(String::from_utf8_lossy(var_name_bytes)),
+                        code: None,
+                    }
+                })?;
+
+                let obj_coeff = col.obj_coeff.unwrap_or(0.);
+                let bound = col.bound.unwrap_or(Bound::Free);
+
+                let var_id = prob.add_var(obj_coeff, bound, Some(var_name));
+                var_ids.insert(var_name_bytes, var_id);
+            }
+
+            //Ok((i, prob))
+
+            println!("{}", prob);
+
+            todo!("update problem");
+        }
+
+        Err(err) => {
+            let input = String::from_utf8_lossy(err.input);
+
+            Err(MpsParsingError {
+                msg: "parsing error".to_string(),
+                input: Some(input),
+                code: Some(err.code),
+            })
+        }
     }
 }
 
-fn parse_mps(i: &[u8]) -> IResult<&[u8], Problem> {
-    let mut prob = Problem::new();
-
+fn parse_mps_impl(i: &[u8]) -> IResult<&[u8], (Rows, Cols)> {
     let (i, _whitespace) = multispace0(i)?;
     let (i, _name) = parse_name(i)?;
 
@@ -43,11 +86,7 @@ fn parse_mps(i: &[u8]) -> IResult<&[u8], Problem> {
     let (i, _whitespace) = multispace0(i)?;
     let (i, _) = tag("ENDATA")(i)?;
 
-    println!("cols: {:?}", cols);
-
-    todo!("update problem");
-
-    Ok((i, prob))
+    Ok((i, (rows, cols)))
 }
 
 fn parse_name(i: &[u8]) -> IResult<&[u8], &[u8]> {
@@ -56,7 +95,7 @@ fn parse_name(i: &[u8]) -> IResult<&[u8], &[u8]> {
     take_till1(is_newline)(i)
 }
 
-fn parse_rows(i: &[u8]) -> IResult<&[u8], HashMap<&[u8], Row>> {
+fn parse_rows(i: &[u8]) -> IResult<&[u8], Rows> {
     let (i, _) = tag("ROWS")(i)?;
     let (i, _whitespace) = multispace1(i)?;
 
@@ -96,10 +135,7 @@ fn parse_row(i: &[u8]) -> IResult<&[u8], (&[u8], Row)> {
 }
 
 //returns map from variable names to objective coefficients
-fn parse_columns<'a>(
-    i: &'a [u8],
-    rows: &mut HashMap<&'a [u8], Row<'a>>,
-) -> IResult<&'a [u8], HashMap<&'a [u8], Col>> {
+fn parse_columns<'a>(i: &'a [u8], rows: &mut Rows<'a>) -> IResult<&'a [u8], Cols<'a>> {
     let (i, _) = tag("COLUMNS")(i)?;
     let (mut i, _whitespace) = multispace1(i)?;
 
@@ -114,8 +150,8 @@ fn parse_columns<'a>(
 
 fn parse_column_line<'a>(
     i: &'a [u8],
-    rows: &mut HashMap<&'a [u8], Row<'a>>,
-    cols: &mut HashMap<&'a [u8], Col>,
+    rows: &mut Rows<'a>,
+    cols: &mut Cols<'a>,
 ) -> IResult<&'a [u8], ()> {
     let (i, var_name) = take_while1(is_alphanumeric)(i)?;
     println!("var name: {}", std::str::from_utf8(var_name).unwrap());
@@ -189,7 +225,7 @@ fn parse_column(i: &[u8]) -> IResult<&[u8], (&[u8], f64)> {
     Ok((i, (col_name, coeff)))
 }
 
-fn parse_all_rhs<'a>(i: &'a [u8], rows: &mut HashMap<&'a [u8], Row<'a>>) -> IResult<&'a [u8], ()> {
+fn parse_all_rhs<'a>(i: &'a [u8], rows: &mut Rows) -> IResult<&'a [u8], ()> {
     let (i, _) = tag("RHS")(i)?;
     let (mut i, _whitespace) = multispace1(i)?;
 
@@ -200,7 +236,7 @@ fn parse_all_rhs<'a>(i: &'a [u8], rows: &mut HashMap<&'a [u8], Row<'a>>) -> IRes
     Ok((i, ()))
 }
 
-fn parse_rhs_line<'a>(i: &'a [u8], rows: &mut HashMap<&'a [u8], Row<'a>>) -> IResult<&'a [u8], ()> {
+fn parse_rhs_line<'a>(i: &'a [u8], rows: &mut Rows) -> IResult<&'a [u8], ()> {
     if i.starts_with(b"BOUNDS") {
         return Err(nom::Err::Failure(nom::error::Error::new(
             i,
@@ -263,7 +299,7 @@ fn parse_rhs(i: &[u8]) -> IResult<&[u8], (&[u8], f64)> {
     Ok((i, (row_name, coeff)))
 }
 
-fn parse_bounds<'a>(i: &'a [u8], cols: &mut HashMap<&'a [u8], Col>) -> IResult<&'a [u8], ()> {
+fn parse_bounds<'a>(i: &'a [u8], cols: &mut Cols) -> IResult<&'a [u8], ()> {
     println!("bounds here:\n{}", std::str::from_utf8(i).unwrap());
     let (i, _) = tag("BOUNDS")(i)?;
     let (i, _ws) = multispace1(i)?;
@@ -397,10 +433,9 @@ struct Col {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::convert::TryInto;
 
     #[test]
-    fn parse_mps() {
+    fn parse_example() {
         let mps_str = r#"
             NAME          TESTPROB
             ROWS
@@ -425,7 +460,7 @@ mod tests {
             ENDATA
         "#;
 
-        let prob: Problem = mps_str.as_bytes().try_into().unwrap();
+        let prob: Problem = parse_mps(mps_str.as_bytes()).unwrap();
         println!("{}", prob);
         todo!()
     }

@@ -1,15 +1,15 @@
 use std::io::Read;
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use ellp::parse_mps;
 use ellp::Problem;
-use std::convert::TryInto;
 
 fn fibonacci(n: u64) -> u64 {
     let f = std::fs::File::open("prob.mps").unwrap();
     let mut reader = std::io::BufReader::new(f);
     let mut mps = Vec::new();
     reader.read_to_end(&mut mps).unwrap();
-    let prob: Problem = mps.as_slice().try_into().unwrap();
+    let prob: Problem = parse_mps(mps.as_slice()).unwrap();
 
     match n {
         0 => 1,
