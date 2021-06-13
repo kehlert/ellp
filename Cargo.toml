@@ -13,9 +13,18 @@ categories = ["mathematics", "science"]
 [dependencies]
 log = "^0"
 nalgebra = "^0"
+nom = {version = "^6", optional = true}
 thiserror = "^1"
 
 [dev-dependencies]
 chrono = "^0"
+criterion = "^0"
 fern = {version = "^0", features = ["colored"]}
 paste = "^1"
+
+[features]
+mps = ["nom"]
+
+[[bench]]
+name = "benchmarks"
+harness = false

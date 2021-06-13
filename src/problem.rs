@@ -88,6 +88,8 @@ impl Problem {
         op: ConstraintOp,
         rhs: f64,
     ) -> Result<(), EllPError> {
+        //TODO error if rhs is not finite
+
         match coeffs
             .iter()
             .find(|(id, _coeff)| !self.var_ids.contains(id))

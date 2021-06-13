@@ -113,6 +113,12 @@ mod solvers;
 mod standard_form;
 mod util;
 
+#[cfg(feature = "mps")]
+mod parse_mps;
+
+#[cfg(feature = "mps")]
+pub use parse_mps::parse_mps;
+
 pub use crate::error::EllPError;
 pub use crate::problem::{Bound, Constraint, ConstraintOp, Problem, Variable};
 pub use crate::solver::{EllPResult, SolverResult};
