@@ -44,15 +44,48 @@ pub fn parse_mps(mps: &[u8]) -> Result<Problem, MpsParsingError> {
                 let obj_coeff = col.obj_coeff.unwrap_or(0.);
                 let bound = col.bound.unwrap_or(Bound::Free);
 
-                let var_id = prob.add_var(obj_coeff, bound, Some(var_name));
+                //should never panic, we know that the var names are unique
+                let var_id = prob.add_var(obj_coeff, bound, Some(var_name)).unwrap();
                 var_ids.insert(var_name_bytes, var_id);
             }
 
-            //Ok((i, prob))
+            for (row_name, row) in rows {
+                match row {
+                    Row::Objective => continue,
+                    Row::Constraint { op, coeffs, rhs } => {
+                        let rhs = rhs.ok_or_else(|| MpsParsingError {
+                            msg: format!(
+                                "did not specify right-hand side for {}",
+                                String::from_utf8_lossy(row_name)
+                            ),
+                            input: None,
+                            code: None,
+                        })?;
 
-            println!("{}", prob);
+                        let coeffs = coeffs
+                            .into_iter()
+                            .map(|(var_name, coeff)| match var_ids.get(var_name) {
+                                Some(var_id) => Ok((*var_id, coeff)),
 
-            todo!("update problem");
+                                None => Err(MpsParsingError {
+                                    msg: format!(
+                                        "for row {}, column {} does not exist",
+                                        String::from_utf8_lossy(row_name),
+                                        String::from_utf8_lossy(var_name)
+                                    ),
+                                    input: None,
+                                    code: None,
+                                }),
+                            })
+                            .collect::<Result<_, _>>()?;
+
+                        //should never panic, we know the variable ids in coeffs exist
+                        prob.add_constraint(coeffs, op, rhs).unwrap();
+                    }
+                }
+            }
+
+            Ok(prob)
         }
 
         Err(err) => {
@@ -154,17 +187,11 @@ fn parse_column_line<'a>(
     cols: &mut Cols<'a>,
 ) -> IResult<&'a [u8], ()> {
     let (i, var_name) = take_while1(is_alphanumeric)(i)?;
-    println!("var name: {}", std::str::from_utf8(var_name).unwrap());
+
     let (i, _ws) = space1(i)?;
     let (i, col_info) = separated_list0(space1, parse_column)(i)?;
 
     for (row_name, coeff) in col_info {
-        println!(
-            "col name: {}, coeff: {}",
-            std::str::from_utf8(row_name).unwrap(),
-            coeff
-        );
-
         match rows.get_mut(row_name) {
             Some(row) => match row {
                 Row::Objective => {
@@ -248,8 +275,6 @@ fn parse_rhs_line<'a>(i: &'a [u8], rows: &mut Rows) -> IResult<&'a [u8], ()> {
     let (i, _ws) = space0(i)?;
     let (i, rhs_info) = separated_list0(space1, parse_rhs)(i)?;
 
-    println!("{:?}", rhs_info);
-
     for (row_name, rhs_val) in rhs_info {
         match rows.get_mut(row_name) {
             Some(row) => match row {
@@ -300,12 +325,9 @@ fn parse_rhs(i: &[u8]) -> IResult<&[u8], (&[u8], f64)> {
 }
 
 fn parse_bounds<'a>(i: &'a [u8], cols: &mut Cols) -> IResult<&'a [u8], ()> {
-    println!("bounds here:\n{}", std::str::from_utf8(i).unwrap());
     let (i, _) = tag("BOUNDS")(i)?;
     let (i, _ws) = multispace1(i)?;
     let (i, bound_info) = separated_list0(multispace1, parse_bound)(i)?;
-
-    println!("bound info: {:?}", bound_info);
 
     for (col_name, bound) in bound_info {
         match cols.get_mut(col_name) {
@@ -379,8 +401,6 @@ fn parse_bounds<'a>(i: &'a [u8], cols: &mut Cols) -> IResult<&'a [u8], ()> {
 fn parse_bound(i: &[u8]) -> IResult<&[u8], (&[u8], Bound)> {
     let (i, bound_type) = alt((tag("UP"), tag("LO"), tag("FR")))(i)?;
 
-    println!("bound type: {}", std::str::from_utf8(bound_type).unwrap());
-
     let (i, _ws) = space1(i)?;
     let (i, _bound_name) = take_while1(is_alphanumeric)(i)?;
 
@@ -432,6 +452,8 @@ struct Col {
 
 #[cfg(test)]
 mod tests {
+    use std::f64::EPSILON;
+
     use super::*;
 
     #[test]
@@ -461,7 +483,45 @@ mod tests {
         "#;
 
         let prob: Problem = parse_mps(mps_str.as_bytes()).unwrap();
-        println!("{}", prob);
-        todo!()
+
+        for var in &prob.variables {
+            match var.name.as_ref().unwrap().as_str() {
+                "XONE" => {
+                    assert!((var.obj_coeff - 1.) < EPSILON);
+                    assert_eq!(var.bound, Bound::Upper(4.));
+                }
+
+                "YTWO" => {
+                    assert!((var.obj_coeff - 4.) < EPSILON);
+                    assert_eq!(var.bound, Bound::TwoSided(-1., 1.));
+                }
+
+                "ZTHREE" => {
+                    assert!((var.obj_coeff - 9.) < EPSILON);
+                    assert_eq!(var.bound, Bound::Free);
+                }
+
+                _ => panic!("unexpected variable: {}", var.name.as_ref().unwrap()),
+            }
+        }
+
+        for constraint in &prob.constraints {
+            match constraint.op {
+                ConstraintOp::Lte => {
+                    assert!((constraint.rhs - 5.) < EPSILON);
+                    assert_eq!(constraint.coeffs.len(), 2);
+                }
+
+                ConstraintOp::Gte => {
+                    assert!((constraint.rhs - 10.) < EPSILON);
+                    assert_eq!(constraint.coeffs.len(), 2);
+                }
+
+                ConstraintOp::Eq => {
+                    assert!((constraint.rhs - 7.) < EPSILON);
+                    assert_eq!(constraint.coeffs.len(), 2);
+                }
+            }
+        }
     }
 }
