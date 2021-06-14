@@ -457,7 +457,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parse_example() {
+    fn parse_mps_example() {
         let mps_str = r#"
             NAME          TESTPROB
             ROWS
