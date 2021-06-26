@@ -18,13 +18,9 @@ thiserror = "^1"
 
 [dev-dependencies]
 chrono = "^0"
-criterion = "^0"
 fern = {version = "^0", features = ["colored"]}
 paste = "^1"
 
 [features]
 mps = []
-
-[[bench]]
-name = "benchmarks"
-harness = false
+benchmarks = ["mps"]
