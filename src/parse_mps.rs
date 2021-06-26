@@ -28,13 +28,11 @@ pub fn parse_mps(mps: &str) -> Result<Problem, MpsParsingError> {
 
     for (var_name, col) in cols {
         let var_name = var_name.to_string();
-
-        let obj_coeff = col.obj_coeff.unwrap_or(0.);
         let bound = col.bound.unwrap_or(Bound::Free);
 
         //should never panic, we know that the var names are unique
         let var_id = prob
-            .add_var(obj_coeff, bound, Some(var_name.clone()))
+            .add_var(col.obj_coeff, bound, Some(var_name.clone()))
             .unwrap();
 
         var_ids.insert(var_name, var_id);
@@ -44,12 +42,7 @@ pub fn parse_mps(mps: &str) -> Result<Problem, MpsParsingError> {
         match row {
             Row::Objective => continue,
             Row::Constraint { op, coeffs, rhs } => {
-                let rhs = rhs.ok_or_else(|| {
-                    MpsParsingError::new(format!(
-                        "did not specify right-hand side for {}",
-                        row_name
-                    ))
-                })?;
+                let rhs = rhs.unwrap_or(0.);
 
                 let coeffs = coeffs
                     .into_iter()
@@ -107,8 +100,6 @@ fn parse_rows_and_cols(mps: &str) -> Result<(Rows, Cols), MpsParsingError> {
             ))
         }
     }
-
-    println!("{:?}", lines.next());
 
     if let Some(line) = lines.next() {
         return Err(MpsParsingError::new(format!("unexpected line: {}", line)));
@@ -300,26 +291,14 @@ fn parse_column_line<'a>(
         )));
     }
 
+    let col_entry = cols.entry(var_name).or_insert_with(|| Col {
+        obj_coeff: 0.,
+        bound: None,
+    });
+
     match rows.get_mut(row_name) {
         Some(row) => match row {
-            Row::Objective => {
-                if cols
-                    .insert(
-                        var_name,
-                        Col {
-                            obj_coeff: Some(coeff),
-                            bound: None,
-                        },
-                    )
-                    .is_some()
-                {
-                    return Err(MpsParsingError::new(format!(
-                        "specified objective coefficient for {} more than once",
-                        var_name
-                    )));
-                }
-            }
-
+            Row::Objective => col_entry.obj_coeff = coeff,
             Row::Constraint { coeffs, .. } => {
                 if coeffs.insert(var_name, coeff).is_some() {
                     return Err(MpsParsingError::new(format!(
@@ -559,7 +538,7 @@ enum Row<'a> {
 
 #[derive(Debug, Clone)]
 struct Col {
-    obj_coeff: Option<f64>,
+    obj_coeff: f64,
     bound: Option<Bound>,
 }
 

@@ -1,7 +1,7 @@
 use std::io::Read;
 
 use criterion::{criterion_group, criterion_main, Criterion};
-use ellp::{parse_mps, MpsParsingError, Problem};
+use ellp::{parse_mps, DualSimplexSolver, MpsParsingError, Problem};
 
 const BENCH_PROB_REL_DIR: &str = "benches/benchmark_problems";
 
@@ -35,11 +35,12 @@ fn read_mps_file(p: &std::path::Path) -> Result<Problem, MpsParsingError> {
 
 fn neos_5251015() {
     let prob_paths = ProblemPaths::new("neos-5251015_lp");
-
-    println!("\nPATHS\n{:?}", prob_paths);
-
     let prob = read_mps_file(&prob_paths.mps).unwrap();
-    println!("{}", prob);
+
+    let dual_solver = DualSimplexSolver::default();
+    let dual_result = dual_solver.solve(prob).unwrap();
+
+    println!("{:?}", dual_result);
 }
 
 fn criterion_benchmark(c: &mut Criterion) {
