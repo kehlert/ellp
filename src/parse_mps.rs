@@ -1,147 +1,196 @@
-use crate::problem::{Bound, Constraint, ConstraintOp, Problem, Variable};
-
-use nom::branch::alt;
-use nom::bytes::complete::{tag, take_till1, take_until, take_while1};
-use nom::character::complete::{char, multispace0, multispace1, satisfy, space0, space1};
-use nom::character::{is_alphanumeric, is_newline};
-use nom::multi::{fold_many1, separated_list0};
-use nom::number::complete::double;
-use nom::Finish;
-use nom::IResult;
+use crate::problem::{Bound, ConstraintOp, Problem};
 
 use log::error;
 use thiserror::Error;
 
-use std::collections::HashMap;
+use std::{collections::HashMap, iter::Peekable};
 
-type Rows<'a> = HashMap<&'a [u8], Row<'a>>;
-type Cols<'a> = HashMap<&'a [u8], Col>;
+type Rows<'a> = HashMap<&'a str, Row<'a>>;
+type Cols<'a> = HashMap<&'a str, Col>;
 
 #[derive(Error, Debug)]
-#[error("MPS parsing error. {msg}\n{code:?}\ninput: {input:?}")]
-pub struct MpsParsingError<'a> {
+#[error("MPS parsing error. {msg}")]
+pub struct MpsParsingError {
     msg: String,
-    input: Option<std::borrow::Cow<'a, str>>,
-    code: Option<nom::error::ErrorKind>,
 }
 
-#[allow(dead_code)]
-pub fn parse_mps(mps: &[u8]) -> Result<Problem, MpsParsingError> {
-    match parse_mps_impl(mps).finish() {
-        Ok((_i, (rows, cols))) => {
-            let mut prob = Problem::new();
-            let mut var_ids = HashMap::new();
-
-            for (var_name_bytes, col) in cols {
-                let var_name = String::from_utf8(var_name_bytes.to_owned()).map_err(|err| {
-                    MpsParsingError {
-                        msg: format!("invalid variable name: {}", err),
-                        input: Some(String::from_utf8_lossy(var_name_bytes)),
-                        code: None,
-                    }
-                })?;
-
-                let obj_coeff = col.obj_coeff.unwrap_or(0.);
-                let bound = col.bound.unwrap_or(Bound::Free);
-
-                //should never panic, we know that the var names are unique
-                let var_id = prob.add_var(obj_coeff, bound, Some(var_name)).unwrap();
-                var_ids.insert(var_name_bytes, var_id);
-            }
-
-            for (row_name, row) in rows {
-                match row {
-                    Row::Objective => continue,
-                    Row::Constraint { op, coeffs, rhs } => {
-                        let rhs = rhs.ok_or_else(|| MpsParsingError {
-                            msg: format!(
-                                "did not specify right-hand side for {}",
-                                String::from_utf8_lossy(row_name)
-                            ),
-                            input: None,
-                            code: None,
-                        })?;
-
-                        let coeffs = coeffs
-                            .into_iter()
-                            .map(|(var_name, coeff)| match var_ids.get(var_name) {
-                                Some(var_id) => Ok((*var_id, coeff)),
-
-                                None => Err(MpsParsingError {
-                                    msg: format!(
-                                        "for row {}, column {} does not exist",
-                                        String::from_utf8_lossy(row_name),
-                                        String::from_utf8_lossy(var_name)
-                                    ),
-                                    input: None,
-                                    code: None,
-                                }),
-                            })
-                            .collect::<Result<_, _>>()?;
-
-                        //should never panic, we know the variable ids in coeffs exist
-                        prob.add_constraint(coeffs, op, rhs).unwrap();
-                    }
-                }
-            }
-
-            Ok(prob)
-        }
-
-        Err(err) => {
-            let input = String::from_utf8_lossy(err.input);
-
-            Err(MpsParsingError {
-                msg: "parsing error".to_string(),
-                input: Some(input),
-                code: Some(err.code),
-            })
-        }
+impl MpsParsingError {
+    fn new(msg: String) -> Self {
+        Self { msg }
     }
 }
 
-fn parse_mps_impl(i: &[u8]) -> IResult<&[u8], (Rows, Cols)> {
-    let (i, _whitespace) = multispace0(i)?;
-    let (i, _name) = parse_name(i)?;
+pub fn parse_mps(mps: &str) -> Result<Problem, MpsParsingError> {
+    let (rows, cols) = parse_rows_and_cols(mps)?;
 
-    let (i, _whitespace) = multispace0(i)?;
-    let (i, mut rows) = parse_rows(i)?;
+    let mut prob = Problem::new();
+    let mut var_ids = HashMap::new();
 
-    let (i, _whitespace) = multispace0(i)?;
-    let (i, mut cols) = parse_columns(i, &mut rows)?;
+    for (var_name, col) in cols {
+        let var_name = var_name.to_string();
 
-    let (i, _whitespace) = multispace0(i)?;
-    let (i, ()) = parse_all_rhs(i, &mut rows)?;
+        let obj_coeff = col.obj_coeff.unwrap_or(0.);
+        let bound = col.bound.unwrap_or(Bound::Free);
 
-    let (i, _whitespace) = multispace0(i)?;
-    let (i, ()) = parse_bounds(i, &mut cols)?;
+        //should never panic, we know that the var names are unique
+        let var_id = prob
+            .add_var(obj_coeff, bound, Some(var_name.clone()))
+            .unwrap();
 
-    let (i, _whitespace) = multispace0(i)?;
-    let (i, _) = tag("ENDATA")(i)?;
+        var_ids.insert(var_name, var_id);
+    }
 
-    Ok((i, (rows, cols)))
+    for (row_name, row) in rows {
+        match row {
+            Row::Objective => continue,
+            Row::Constraint { op, coeffs, rhs } => {
+                let rhs = rhs.ok_or_else(|| {
+                    MpsParsingError::new(format!(
+                        "did not specify right-hand side for {}",
+                        row_name
+                    ))
+                })?;
+
+                let coeffs = coeffs
+                    .into_iter()
+                    .map(|(var_name, coeff)| match var_ids.get(var_name) {
+                        Some(var_id) => Ok((*var_id, coeff)),
+
+                        None => Err(MpsParsingError::new(format!(
+                            "for row {}, column {} does not exist",
+                            row_name, var_name
+                        ))),
+                    })
+                    .collect::<Result<_, _>>()?;
+
+                //should never panic, we know the variable ids in coeffs exist
+                prob.add_constraint(coeffs, op, rhs).unwrap();
+            }
+        }
+    }
+
+    Ok(prob)
 }
 
-fn parse_name(i: &[u8]) -> IResult<&[u8], &[u8]> {
-    let (i, _) = tag("NAME")(i)?;
-    let (i, _whitespace) = space1(i)?;
-    take_till1(is_newline)(i)
+fn parse_rows_and_cols(mps: &str) -> Result<(Rows, Cols), MpsParsingError> {
+    let mut lines = mps
+        .split_terminator('\n')
+        .filter(|s| !s.trim().is_empty())
+        .peekable();
+
+    match lines.next() {
+        Some(line) => parse_name(line)?,
+        None => return Err(MpsParsingError::new("could not find NAME line".to_string())),
+    }
+
+    let mut rows = parse_rows(&mut lines)?;
+    let mut cols = parse_columns(&mut lines, &mut rows)?;
+
+    parse_rhs(&mut lines, &mut rows)?;
+    parse_bounds(&mut lines, &mut cols)?;
+
+    match lines.next() {
+        Some(line) => {
+            let i = line.trim();
+
+            if i != "ENDATA" {
+                return Err(MpsParsingError::new(format!(
+                    "expected 'ENDATA', found '{}'",
+                    line
+                )));
+            }
+        }
+
+        None => {
+            return Err(MpsParsingError::new(
+                "could not find ENDATA line".to_string(),
+            ))
+        }
+    }
+
+    println!("{:?}", lines.next());
+
+    if let Some(line) = lines.next() {
+        return Err(MpsParsingError::new(format!("unexpected line: {}", line)));
+    }
+
+    Ok((rows, cols))
 }
 
-fn parse_rows(i: &[u8]) -> IResult<&[u8], Rows> {
-    let (i, _) = tag("ROWS")(i)?;
-    let (i, _whitespace) = multispace1(i)?;
+fn parse_name(line: &str) -> Result<(), MpsParsingError> {
+    let mut i = line.split_whitespace();
 
-    fold_many1(parse_row, HashMap::new(), |mut rows, (name, row)| {
-        let already_present = rows.insert(name, row).is_some();
-        assert!(!already_present);
-        rows
-    })(i)
+    let name = i
+        .next()
+        .map(|tag| if tag == "NAME" { i.next() } else { None })
+        .flatten();
+
+    if name.is_none() {
+        return Err(MpsParsingError::new(format!(
+            "could not find name in NAME line: {}",
+            line
+        )));
+    }
+
+    match i.next() {
+        Some(s) => Err(MpsParsingError::new(format!(
+            "unexpected input in NAME line: {}",
+            s
+        ))),
+
+        None => Ok(()),
+    }
 }
 
-fn parse_row(i: &[u8]) -> IResult<&[u8], (&[u8], Row)> {
-    let (i, _whitespace) = space0(i)?;
-    let (i, row_type) = satisfy(|c| c == 'L' || c == 'G' || c == 'E' || c == 'N')(i)?;
+fn parse_rows<'a, I>(lines: &mut Peekable<I>) -> Result<Rows<'a>, MpsParsingError>
+where
+    I: Iterator<Item = &'a str>,
+{
+    match lines.next() {
+        Some(line) => {
+            let i = line.trim();
+
+            if i != "ROWS" {
+                return Err(MpsParsingError::new(format!(
+                    "expected 'ROWS', found '{}'",
+                    line
+                )));
+            }
+        }
+
+        None => return Err(MpsParsingError::new("could not find ROWS line".to_string())),
+    }
+
+    let mut rows = HashMap::new();
+
+    while let Some(&line) = lines.peek() {
+        let line = line.trim_start();
+
+        if line.starts_with("COLUMNS") {
+            break;
+        }
+
+        lines.next();
+
+        let (name, row) = parse_row_line(line)?;
+
+        if rows.insert(name, row).is_some() {
+            return Err(MpsParsingError::new(format!("row name repeated: {}", name)));
+        }
+    }
+
+    Ok(rows)
+}
+
+fn parse_row_line(line: &str) -> Result<(&str, Row), MpsParsingError> {
+    let mut i = line.split_whitespace();
+
+    let constraint_op_char = i.next().ok_or_else(|| {
+        MpsParsingError::new(format!(
+            "expected a row type character in this line: {}",
+            line
+        ))
+    })?;
 
     let new_constraint = |op| Row::Constraint {
         op,
@@ -149,288 +198,352 @@ fn parse_row(i: &[u8]) -> IResult<&[u8], (&[u8], Row)> {
         rhs: None,
     };
 
-    let row = match row_type {
-        'L' => new_constraint(ConstraintOp::Lte),
-        'G' => new_constraint(ConstraintOp::Gte),
-        'E' => new_constraint(ConstraintOp::Eq),
-        'N' => Row::Objective,
-        _ => panic!(
-            "internal mps parser error, unexpected row type: {}",
-            row_type
-        ),
+    let row = match constraint_op_char {
+        "L" => new_constraint(ConstraintOp::Lte),
+        "G" => new_constraint(ConstraintOp::Gte),
+        "E" => new_constraint(ConstraintOp::Eq),
+        "N" => Row::Objective,
+        _ => {
+            return Err(MpsParsingError::new(format!(
+                "unexpected row type: {}",
+                constraint_op_char
+            )))
+        }
     };
 
-    let (i, _whitespace) = space0(i)?;
-    let (i, row_name) = take_till1(is_newline)(i)?;
-    let (i, _newline) = char('\n')(i)?;
+    let row_name = i.next().ok_or_else(|| {
+        MpsParsingError::new(format!("expected a row name in this line: {}", line))
+    })?;
 
-    Ok((i, (row_name, row)))
-}
+    match i.next() {
+        Some(s) => Err(MpsParsingError::new(format!(
+            "unexpected input in row line: {}",
+            s
+        ))),
 
-//returns map from variable names to objective coefficients
-fn parse_columns<'a>(i: &'a [u8], rows: &mut Rows<'a>) -> IResult<&'a [u8], Cols<'a>> {
-    let (i, _) = tag("COLUMNS")(i)?;
-    let (mut i, _whitespace) = multispace1(i)?;
-
-    let mut cols = HashMap::new();
-
-    while let Ok((j, ())) = parse_column_line(i, rows, &mut cols) {
-        i = j
+        None => Ok((row_name, row)),
     }
-
-    Ok((i, cols))
 }
 
-fn parse_column_line<'a>(
-    i: &'a [u8],
+fn parse_columns<'a, I>(
+    lines: &mut Peekable<I>,
     rows: &mut Rows<'a>,
-    cols: &mut Cols<'a>,
-) -> IResult<&'a [u8], ()> {
-    let (i, var_name) = take_while1(is_alphanumeric)(i)?;
+) -> Result<Cols<'a>, MpsParsingError>
+where
+    I: Iterator<Item = &'a str>,
+{
+    match lines.next() {
+        Some(line) => {
+            let i = line.trim();
 
-    let (i, _ws) = space1(i)?;
-    let (i, col_info) = separated_list0(space1, parse_column)(i)?;
-
-    for (row_name, coeff) in col_info {
-        match rows.get_mut(row_name) {
-            Some(row) => match row {
-                Row::Objective => {
-                    if cols
-                        .insert(
-                            var_name,
-                            Col {
-                                obj_coeff: Some(coeff),
-                                bound: None,
-                            },
-                        )
-                        .is_some()
-                    {
-                        error!(
-                            "specified objective coefficient for {} more than once",
-                            std::str::from_utf8(var_name).unwrap()
-                        );
-
-                        return Err(nom::Err::Failure(nom::error::Error::new(
-                            i,
-                            nom::error::ErrorKind::Tag,
-                        )));
-                    }
-                }
-
-                Row::Constraint { coeffs, .. } => {
-                    if coeffs.insert(var_name, coeff).is_some() {
-                        error!(
-                            "specified constraint coefficient for {} more than once",
-                            std::str::from_utf8(var_name).unwrap()
-                        );
-
-                        return Err(nom::Err::Failure(nom::error::Error::new(
-                            i,
-                            nom::error::ErrorKind::Tag,
-                        )));
-                    }
-                }
-            },
-
-            None => {
-                return Err(nom::Err::Failure(nom::error::Error::new(
-                    i,
-                    nom::error::ErrorKind::Tag,
-                )))
-            }
-        }
-    }
-
-    let (i, _ws) = multispace1(i)?;
-    Ok((i, ()))
-}
-
-fn parse_column(i: &[u8]) -> IResult<&[u8], (&[u8], f64)> {
-    let (i, col_name) = take_while1(is_alphanumeric)(i)?;
-    let (i, _whitespace) = space1(i)?;
-    let (i, coeff) = double(i)?;
-    Ok((i, (col_name, coeff)))
-}
-
-fn parse_all_rhs<'a>(i: &'a [u8], rows: &mut Rows) -> IResult<&'a [u8], ()> {
-    let (i, _) = tag("RHS")(i)?;
-    let (mut i, _whitespace) = multispace1(i)?;
-
-    while let Ok((j, ())) = parse_rhs_line(i, rows) {
-        i = j
-    }
-
-    Ok((i, ()))
-}
-
-fn parse_rhs_line<'a>(i: &'a [u8], rows: &mut Rows) -> IResult<&'a [u8], ()> {
-    if i.starts_with(b"BOUNDS") {
-        return Err(nom::Err::Failure(nom::error::Error::new(
-            i,
-            nom::error::ErrorKind::Tag,
-        )));
-    }
-
-    let (i, _rhs_name) = take_while1(is_alphanumeric)(i)?;
-    let (i, _ws) = space0(i)?;
-    let (i, rhs_info) = separated_list0(space1, parse_rhs)(i)?;
-
-    for (row_name, rhs_val) in rhs_info {
-        match rows.get_mut(row_name) {
-            Some(row) => match row {
-                Row::Objective => {
-                    error!("should not specific rhs value for the objective",);
-
-                    return Err(nom::Err::Failure(nom::error::Error::new(
-                        i,
-                        nom::error::ErrorKind::Tag,
-                    )));
-                }
-
-                Row::Constraint { rhs, .. } => {
-                    if rhs.is_some() {
-                        error!(
-                            "specified rhs for {} more than once",
-                            std::str::from_utf8(row_name).unwrap()
-                        );
-
-                        return Err(nom::Err::Failure(nom::error::Error::new(
-                            i,
-                            nom::error::ErrorKind::Tag,
-                        )));
-                    }
-
-                    *rhs = Some(rhs_val);
-                }
-            },
-
-            None => {
-                return Err(nom::Err::Failure(nom::error::Error::new(
-                    i,
-                    nom::error::ErrorKind::Tag,
-                )))
-            }
-        }
-    }
-
-    let (i, _ws) = multispace1(i)?;
-    Ok((i, ()))
-}
-
-fn parse_rhs(i: &[u8]) -> IResult<&[u8], (&[u8], f64)> {
-    let (i, row_name) = take_while1(is_alphanumeric)(i)?;
-    let (i, _ws) = space1(i)?;
-    let (i, coeff) = double(i)?;
-    Ok((i, (row_name, coeff)))
-}
-
-fn parse_bounds<'a>(i: &'a [u8], cols: &mut Cols) -> IResult<&'a [u8], ()> {
-    let (i, _) = tag("BOUNDS")(i)?;
-    let (i, _ws) = multispace1(i)?;
-    let (i, bound_info) = separated_list0(multispace1, parse_bound)(i)?;
-
-    for (col_name, bound) in bound_info {
-        match cols.get_mut(col_name) {
-            Some(col) => match col.bound {
-                Some(prev_bound) => match prev_bound {
-                    Bound::Lower(lb) => {
-                        if let Bound::Upper(ub) = bound {
-                            col.bound.replace(Bound::TwoSided(lb, ub));
-                        } else {
-                            error!(
-                                "invalid bounds for {}",
-                                std::str::from_utf8(col_name).unwrap()
-                            );
-
-                            return Err(nom::Err::Failure(nom::error::Error::new(
-                                i,
-                                nom::error::ErrorKind::Tag,
-                            )));
-                        }
-                    }
-
-                    Bound::Upper(ub) => {
-                        if let Bound::Lower(lb) = bound {
-                            col.bound.replace(Bound::TwoSided(lb, ub));
-                        } else {
-                            error!(
-                                "invalid bounds for {}",
-                                std::str::from_utf8(col_name).unwrap()
-                            );
-
-                            return Err(nom::Err::Failure(nom::error::Error::new(
-                                i,
-                                nom::error::ErrorKind::Tag,
-                            )));
-                        }
-                    }
-
-                    _ => {
-                        error!(
-                            "invalid bounds for {}",
-                            std::str::from_utf8(col_name).unwrap()
-                        );
-
-                        return Err(nom::Err::Failure(nom::error::Error::new(
-                            i,
-                            nom::error::ErrorKind::Tag,
-                        )));
-                    }
-                },
-
-                None => col.bound = Some(bound),
-            },
-
-            None => {
-                error!(
-                    "found bound for {}, but that column does not exist",
-                    std::str::from_utf8(col_name).unwrap()
-                );
-
-                return Err(nom::Err::Failure(nom::error::Error::new(
-                    i,
-                    nom::error::ErrorKind::Tag,
+            if i != "COLUMNS" {
+                return Err(MpsParsingError::new(format!(
+                    "expected 'COLUMNS', found '{}'",
+                    line
                 )));
             }
         }
+
+        None => {
+            return Err(MpsParsingError::new(
+                "could not find COLUMNS line".to_string(),
+            ))
+        }
     }
 
-    Ok((i, ()))
+    let mut cols = HashMap::new();
+
+    while let Some(&line) = lines.peek() {
+        let line = line.trim_start();
+
+        if line.starts_with("RHS") {
+            break;
+        }
+
+        lines.next();
+        parse_column_line(line, rows, &mut cols)?;
+    }
+
+    Ok(cols)
 }
 
-fn parse_bound(i: &[u8]) -> IResult<&[u8], (&[u8], Bound)> {
-    let (i, bound_type) = alt((tag("UP"), tag("LO"), tag("FR")))(i)?;
+fn parse_column_line<'a>(
+    line: &'a str,
+    rows: &mut Rows<'a>,
+    cols: &mut Cols<'a>,
+) -> Result<(), MpsParsingError> {
+    let mut i = line.split_whitespace();
 
-    let (i, _ws) = space1(i)?;
-    let (i, _bound_name) = take_while1(is_alphanumeric)(i)?;
+    let var_name = i.next().ok_or_else(|| {
+        MpsParsingError::new(format!("expected a column name in this line: {}", line))
+    })?;
 
-    let (i, _ws) = space1(i)?;
-    let (mut i, col_name) = take_while1(is_alphanumeric)(i)?;
+    let row_name = i.next().ok_or_else(|| {
+        MpsParsingError::new(format!("expected a row name in this line: {}", line))
+    })?;
 
-    let bound = match bound_type {
-        b"UP" => {
-            let (j, _ws) = space1(i)?;
-            let res = double(j)?;
-            i = res.0;
-            Bound::Upper(res.1)
+    let coeff = i.next().ok_or_else(|| {
+        MpsParsingError::new(format!("expected a coefficient in this line: {}", line))
+    })?;
+
+    let coeff: f64 = coeff.parse().map_err(|err| {
+        MpsParsingError::new(format!(
+            "could not parse the coefficient {}\nerror: {}\nline: {}",
+            coeff, err, line
+        ))
+    })?;
+
+    if let Some(s) = i.next() {
+        return Err(MpsParsingError::new(format!(
+            "unexpected input '{}' in column line: {}",
+            s, line
+        )));
+    }
+
+    match rows.get_mut(row_name) {
+        Some(row) => match row {
+            Row::Objective => {
+                if cols
+                    .insert(
+                        var_name,
+                        Col {
+                            obj_coeff: Some(coeff),
+                            bound: None,
+                        },
+                    )
+                    .is_some()
+                {
+                    return Err(MpsParsingError::new(format!(
+                        "specified objective coefficient for {} more than once",
+                        var_name
+                    )));
+                }
+            }
+
+            Row::Constraint { coeffs, .. } => {
+                if coeffs.insert(var_name, coeff).is_some() {
+                    return Err(MpsParsingError::new(format!(
+                        "specified constraint coefficient for the columne {} and row {} more than once",
+                        var_name, row_name
+                    )));
+                }
+            }
+        },
+
+        None => {
+            return Err(MpsParsingError::new(format!(
+                "could not find the row {}",
+                row_name
+            )))
+        }
+    }
+
+    match i.next() {
+        Some(s) => Err(MpsParsingError::new(format!(
+            "unexpected input in column line: {}",
+            s
+        ))),
+
+        None => Ok(()),
+    }
+}
+
+fn parse_rhs<'a, I>(lines: &mut Peekable<I>, rows: &mut Rows) -> Result<(), MpsParsingError>
+where
+    I: Iterator<Item = &'a str>,
+{
+    match lines.next() {
+        Some(line) => {
+            let i = line.trim();
+
+            if i != "RHS" {
+                return Err(MpsParsingError::new(format!(
+                    "expected 'RHS', found '{}'",
+                    line
+                )));
+            }
         }
 
-        b"LO" => {
-            let (j, _ws) = space1(i)?;
-            let res = double(j)?;
-            i = res.0;
-            Bound::Lower(res.1)
+        None => return Err(MpsParsingError::new("could not find RHS line".to_string())),
+    }
+
+    while let Some(&line) = lines.peek() {
+        let line = line.trim_start();
+
+        if line.starts_with("BOUNDS") {
+            break;
         }
 
-        b"FR" => Bound::Free,
+        lines.next();
+        parse_rhs_line(line, rows)?;
+    }
 
-        _ => panic!(
-            "internal mps parser error, unexpected bound type: {}",
-            std::str::from_utf8(bound_type).unwrap()
-        ),
+    Ok(())
+}
+
+fn parse_rhs_line(line: &str, rows: &mut Rows) -> Result<(), MpsParsingError> {
+    let mut i = line.split_whitespace().skip(1); //skip the name
+
+    let row_name = i.next().ok_or_else(|| {
+        MpsParsingError::new(format!("expected a row name in this line: {}", line))
+    })?;
+
+    let rhs_val = i.next().ok_or_else(|| {
+        MpsParsingError::new(format!("expected a rhs value in this line: {}", line))
+    })?;
+
+    let rhs_val: f64 = rhs_val.parse().map_err(|err| {
+        MpsParsingError::new(format!(
+            "could not parse the rhs value {}\nerror: {}\nline: {}",
+            rhs_val, err, line
+        ))
+    })?;
+
+    match rows.get_mut(row_name) {
+        Some(row) => match row {
+            Row::Objective => {
+                return Err(MpsParsingError::new(
+                    "should not specify rhs value for the objective".to_string(),
+                ));
+            }
+
+            Row::Constraint { rhs, .. } => {
+                if rhs.is_some() {
+                    return Err(MpsParsingError::new(format!(
+                        "specified rhs for {} more than once",
+                        row_name
+                    )));
+                }
+
+                *rhs = Some(rhs_val);
+            }
+        },
+
+        None => {
+            return Err(MpsParsingError::new(format!(
+                "could not find the row {}",
+                row_name
+            )))
+        }
+    }
+
+    match i.next() {
+        Some(s) => Err(MpsParsingError::new(format!(
+            "unexpected input in column line: {}",
+            s
+        ))),
+
+        None => Ok(()),
+    }
+}
+
+fn parse_bounds<'a, I>(lines: &mut Peekable<I>, cols: &mut Cols) -> Result<(), MpsParsingError>
+where
+    I: Iterator<Item = &'a str>,
+{
+    match lines.next() {
+        Some(line) => {
+            let i = line.trim();
+
+            if i != "BOUNDS" {
+                return Err(MpsParsingError::new(format!(
+                    "expected 'BOUNDS', found '{}'",
+                    line
+                )));
+            }
+        }
+
+        None => {
+            return Err(MpsParsingError::new(
+                "could not find BOUNDS line".to_string(),
+            ))
+        }
+    }
+
+    while let Some(&line) = lines.peek() {
+        let line = line.trim_start();
+
+        if line.starts_with("ENDATA") {
+            break;
+        }
+
+        lines.next();
+        parse_bound_line(line, cols)?;
+    }
+
+    Ok(())
+}
+
+fn parse_bound_line(line: &str, cols: &mut Cols) -> Result<(), MpsParsingError> {
+    let mut i = line.split_whitespace();
+
+    let bound_type = i.next().ok_or_else(|| {
+        MpsParsingError::new(format!("expected a bound type in this line: {}", line))
+    })?;
+
+    i.next(); //skip bound name
+
+    let col_name = i.next().ok_or_else(|| {
+        MpsParsingError::new(format!("expected a column name in this line: {}", line))
+    })?;
+
+    let bound_val = i.next().map(str::parse::<f64>).transpose().map_err(|err| {
+        MpsParsingError::new(format!(
+            "could not parse the bound value\nerror: {}\nline: {}",
+            err, line
+        ))
+    })?;
+
+    let bound = match (bound_type, bound_val) {
+        ("UP", Some(v)) => Bound::Upper(v),
+        ("LO", Some(v)) => Bound::Lower(v),
+        ("FR", None) => Bound::Free,
+        _ => {
+            return Err(MpsParsingError::new(format!(
+                "invalid bound specification: {}",
+                line
+            )))
+        }
     };
 
-    Ok((i, (col_name, bound)))
+    let col = match cols.get_mut(col_name) {
+        Some(col) => col,
+
+        None => {
+            return Err(MpsParsingError::new(format!(
+                "found bound for the column {}, but it does not exist",
+                col_name,
+            )))
+        }
+    };
+
+    match (col.bound, bound) {
+        (Some(Bound::Upper(ub)), Bound::Lower(lb)) => {
+            col.bound.replace(Bound::TwoSided(lb, ub));
+        }
+
+        (Some(Bound::Lower(lb)), Bound::Upper(ub)) => {
+            col.bound.replace(Bound::TwoSided(lb, ub));
+        }
+
+        (None, _) => col.bound = Some(bound),
+
+        _ => {
+            return Err(MpsParsingError::new(format!(
+                "invalid bounds for {}",
+                col_name,
+            )))
+        }
+    }
+
+    match i.next() {
+        Some(s) => Err(MpsParsingError::new(format!(
+            "unexpected input in column line: {}",
+            s
+        ))),
+
+        None => Ok(()),
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -439,7 +552,7 @@ enum Row<'a> {
 
     Constraint {
         op: ConstraintOp,
-        coeffs: HashMap<&'a [u8], f64>,
+        coeffs: HashMap<&'a str, f64>,
         rhs: Option<f64>,
     },
 }
@@ -466,14 +579,18 @@ mod tests {
             G  LIM2
             E  MYEQN
             COLUMNS
-                XONE      COST                 1   LIM1                 1
+                XONE      COST                 1
+                XONE      LIM1                 1
                 XONE      LIM2                 1
-                YTWO      COST                 4   LIM1                 1
+                YTWO      COST                 4
+                YTWO      LIM1                 1
                 YTWO      MYEQN               -1
-                ZTHREE    COST                 9   LIM2                 1
+                ZTHREE    COST                 9
+                ZTHREE    LIM2                 1
                 ZTHREE    MYEQN                1
             RHS
-                RHS1      LIM1                 5   LIM2                10
+                RHS1      LIM1                 5
+                RHS1      LIM2                10
                 RHS1      MYEQN                7
             BOUNDS
             UP BND1      XONE                 4
@@ -482,7 +599,7 @@ mod tests {
             ENDATA
         "#;
 
-        let prob: Problem = parse_mps(mps_str.as_bytes()).unwrap();
+        let prob: Problem = parse_mps(mps_str).unwrap();
 
         for var in &prob.variables {
             match var.name.as_ref().unwrap().as_str() {

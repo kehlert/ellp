@@ -23,7 +23,7 @@ fern = {version = "^0", features = ["colored"]}
 paste = "^1"
 
 [features]
-mps = ["nom"]
+mps = []
 
 [[bench]]
 name = "benchmarks"

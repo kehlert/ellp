@@ -7,7 +7,7 @@ use crate::error::EllPError;
 use crate::problem::{Bound, Problem};
 use crate::solver::{EllPResult, OptimalPoint, Solution, SolutionStatus, SolverResult};
 use crate::solvers::trivial::solve_trivial_problem;
-use crate::standard_form::{BasicPoint, Nonbasic, NonbasicBound, StandardizedProblem};
+use crate::standard_form::{BasicPoint, NonbasicBound, StandardizedProblem};
 use crate::util::{EPS, ITER_WIDTH};
 use crate::PrimalSimplexSolver;
 
