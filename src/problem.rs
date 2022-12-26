@@ -259,7 +259,7 @@ impl Constraint {
                 continue;
             }
 
-            let var = *var_names.get(&var_id).unwrap();
+            let var = *var_names.get(var_id).unwrap();
 
             write!(
                 f,
@@ -304,11 +304,19 @@ pub enum ConstraintOp {
 
 impl std::fmt::Display for Problem {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        writeln!(
+            f,
+            "{} variables and {} constraints\n",
+            self.variables.len(),
+            self.constraints.len()
+        )?;
+
         writeln!(f, "minimize")?;
+
         let mut var_id_to_var: HashMap<VariableId, &Variable> = HashMap::new();
 
         for var in &self.variables {
-            let result = var_id_to_var.insert(var.id, &var);
+            let result = var_id_to_var.insert(var.id, var);
             assert!(result.is_none()); //should have have repeated ids
 
             if var.obj_coeff == 0. {

@@ -1,6 +1,10 @@
+#[cfg(feature = "benchmarks")]
+use ellp::parse_mps;
+
 use ellp::*;
 
 const EPS: f64 = 0.00000001;
+const REL_EPS: f64 = 0.000001;
 
 macro_rules! assert_optimal {
     ($prob:expr, $expected_obj:expr, $expected_x:expr) => {
@@ -44,7 +48,8 @@ macro_rules! assert_optimal_obj {
         TestProblem::new($prob, |result: &SolverResult| match result {
             SolverResult::Optimal(sol) => {
                 assert!(
-                    (sol.obj() - $expected_obj).abs() < EPS,
+                    (sol.obj() - $expected_obj).abs() < EPS
+                        || (sol.obj() / $expected_obj - 1.).abs() < REL_EPS,
                     "obj: {}, expected: {}",
                     sol.obj(),
                     $expected_obj
@@ -63,6 +68,49 @@ macro_rules! assert_infeasible {
             _ => panic!("not infeasible: {:?}", result),
         })
     };
+}
+
+#[cfg(feature = "mps")]
+fn read_mps_file(problem_name: &str) -> Result<Problem, MpsParsingError> {
+    use std::io::Read;
+
+    let mut mps_path = std::env::current_dir().unwrap();
+    mps_path.push("tests");
+    mps_path.push("benchmark_problems");
+    mps_path.push(problem_name);
+    mps_path.push(format!("{}.mps", problem_name));
+
+    let f = std::fs::File::open(mps_path).unwrap();
+    let mut reader = std::io::BufReader::new(f);
+    let mut mps = Vec::new();
+    reader.read_to_end(&mut mps).unwrap();
+    let mps = std::str::from_utf8(&mps).unwrap();
+    parse_mps(mps)
+}
+
+#[allow(dead_code)]
+fn setup_logger(log_level: log::LevelFilter) {
+    use fern::colors::{Color, ColoredLevelConfig};
+
+    let colors = ColoredLevelConfig::new()
+        .debug(Color::White)
+        .info(Color::Green)
+        .warn(Color::BrightYellow)
+        .error(Color::BrightRed);
+
+    //ignore the result so setup_logger can be called more than once when running multiple tests
+    let _ = fern::Dispatch::new()
+        .format(move |out, message, record| {
+            out.finish(format_args!(
+                "{} | {:5} | {}",
+                chrono::Local::now().format("%Y-%m-%d %H:%M:%S%.6f"),
+                colors.color(record.level()),
+                message
+            ))
+        })
+        .level(log_level)
+        .chain(std::io::stdout())
+        .apply();
 }
 
 pub struct TestProblem {
@@ -604,4 +652,23 @@ pub fn beale_cycle() -> TestProblem {
         .unwrap();
 
     assert_optimal!(prob, -1., &[1., 0., 1., 0.])
+}
+
+#[cfg(feature = "benchmarks")]
+pub fn afiro() -> TestProblem {
+    //setup_logger(log::LevelFilter::Info);
+    let prob = read_mps_file("afiro").unwrap();
+    assert_optimal_obj!(prob, -4.6475314286E+02)
+}
+
+#[cfg(feature = "benchmarks")]
+pub fn adlittle() -> TestProblem {
+    let prob = read_mps_file("adlittle").unwrap();
+    assert_optimal_obj!(prob, 2.2549496316E+05)
+}
+
+#[cfg(feature = "benchmarks")]
+pub fn blend() -> TestProblem {
+    let prob = read_mps_file("blend").unwrap();
+    assert_optimal_obj!(prob, -3.0812149846E+01)
 }

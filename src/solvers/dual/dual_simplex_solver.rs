@@ -68,8 +68,7 @@ impl DualSimplexSolver {
             }
 
             SolutionStatus::Infeasible => {
-                info!("problem is infeasible");
-                return Ok(SolverResult::Infeasible);
+                panic!("dual phase 1 should never be infeasible");
             }
 
             SolutionStatus::Unbounded => panic!("dual phase 1 should never be unbounded"),
@@ -182,12 +181,12 @@ impl DualSimplexSolver {
             nalgebra::DVector::from_iterator(N.len(), N.iter().map(|i| std_form.c[i.index]));
 
         let mut iter = 0u64;
-        let mut obj = std_form.dual_obj(y, &d);
+        let mut obj = std_form.dual_obj(y, d);
 
         let mut zero_vector = nalgebra::DVector::zeros(std_form.rows());
 
         loop {
-            info!("{:it$}  |  {:.8E}", iter, obj, it = ITER_WIDTH,);
+            debug!("{:it$}  |  {:.8E}", iter, obj, it = ITER_WIDTH,);
 
             if iter >= self.max_iter {
                 debug!("reached max iterations");
@@ -205,7 +204,7 @@ impl DualSimplexSolver {
                     Bound::Free => None,
 
                     Bound::Lower(lb) => {
-                        if x_i < lb {
+                        if x_i < lb - EPS {
                             Some((x_i - lb, NonbasicBound::Lower))
                         } else {
                             None
@@ -213,7 +212,7 @@ impl DualSimplexSolver {
                     }
 
                     Bound::Upper(ub) => {
-                        if x_i > ub {
+                        if x_i > ub + EPS {
                             Some((x_i - ub, NonbasicBound::Upper))
                         } else {
                             None
@@ -221,9 +220,9 @@ impl DualSimplexSolver {
                     }
 
                     Bound::TwoSided(lb, ub) => {
-                        if x_i > ub {
+                        if x_i > ub + EPS {
                             Some((x_i - ub, NonbasicBound::Upper))
-                        } else if x_i < lb {
+                        } else if x_i < lb - EPS {
                             Some((x_i - lb, NonbasicBound::Lower))
                         } else {
                             None

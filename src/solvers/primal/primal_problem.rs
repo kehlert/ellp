@@ -160,8 +160,13 @@ impl std::convert::From<Problem> for Option<PrimalPhase1> {
             let A_F = nalgebra::DMatrix::from_columns(&cols);
 
             let lu_decomp = A_F.full_piv_lu();
+
+            let (U_rows, U_cols) = lu_decomp.u().shape();
+            let max_rank = std::cmp::min(U_rows, U_cols);
+
             let rank = lu_decomp
                 .u()
+                .slice((0, 0), (max_rank, max_rank))
                 .diagonal()
                 .iter()
                 .enumerate()

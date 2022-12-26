@@ -158,7 +158,7 @@ impl PrimalSimplexSolver {
 
         //TODO set max iterations for the solver
         loop {
-            info!("{:it$}  |  {:.8E}", iter, std_form.obj(x), it = ITER_WIDTH,);
+            debug!("{:it$}  |  {:.8E}", iter, std_form.obj(x), it = ITER_WIDTH,);
 
             if iter > self.max_iter {
                 debug!("reached max iterations");
@@ -330,14 +330,20 @@ impl PrimalSimplexSolver {
                 Bound::Lower(lb) => {
                     if d_i > 0. {
                         f64::INFINITY
-                    } else {
+                    } else if x_i > lb {
                         (lb - x_i) / d_i
+                    } else {
+                        0. //x_i may be slightly infeasible
                     }
                 }
 
                 Bound::Upper(ub) => {
                     if d_i > 0. {
-                        (ub - x_i) / d_i
+                        if x_i < ub {
+                            (ub - x_i) / d_i
+                        } else {
+                            0. //x_i may be slightly infeasible
+                        }
                     } else {
                         f64::INFINITY
                     }
@@ -345,16 +351,30 @@ impl PrimalSimplexSolver {
 
                 Bound::TwoSided(lb, ub) => {
                     if d_i > 0. {
-                        (ub - x_i) / d_i
-                    } else {
+                        if x_i < ub {
+                            (ub - x_i) / d_i
+                        } else {
+                            0. //x_i may be slightly infeasible
+                        }
+                    } else if x_i < lb {
                         (lb - x_i) / d_i
+                    } else {
+                        0. //x_i may be slightly infeasible
                     }
                 }
 
                 Bound::Fixed(..) => 0.,
             };
 
-            trace!("i: {}, lambda_i: {}, lambda: {}", i, lambda_i, lambda);
+            trace!(
+                "i={}, lambda_i={}, lambda={}, d_i={}, x_i={}, bound={}",
+                i,
+                lambda_i,
+                lambda,
+                d_i,
+                x_i,
+                std_form.bounds[basic.index]
+            );
 
             if lambda_i < lambda - EPS {
                 lambda = lambda_i;
@@ -402,7 +422,8 @@ impl PrimalSimplexSolver {
                 basic: new_basic,
                 nonbasic: pivot.1,
             })
-        } else if lambda == 0. {
+        } else if lambda == 0. || lambda > -1E-6 {
+            //lambda < 0 can happen if x is slightly infeasible
             PivotResult::Pivot(Pivot {
                 basic: new_basic,
                 nonbasic: pivot.1,

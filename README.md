@@ -111,10 +111,14 @@ If the problem is infeasible or unbounded, then `solve` will return `SolverResul
 
 ## Development priorities
 * clean up the code, add proper logging
-* add more test problems (including large ones)
 * performance improvements (LU factorization update, steepest edge)
-* add benchmarks
+* add benchmarks and test problems, and document how to run them (and how to run all tests)
 * switch to sparse matrices (perhaps make it optional)
+* make a binary that solves problems given by mps files
+
+## Various notes
+* problems in MPS format taken from https://netlib.org/lp/
+* can run them with `cargo test --features benchmarks`
 
 
 

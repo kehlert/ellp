@@ -11,6 +11,19 @@ pub enum SolverResult {
     MaxIter { obj: f64 },
 }
 
+impl std::fmt::Display for SolverResult {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self {
+            Self::Optimal(sol) => write!(f, "found optimal point with objective {}", sol.obj()),
+            Self::Infeasible => write!(f, "problem is infeasible"),
+            Self::Unbounded => write!(f, "problem is unbounded"),
+            Self::MaxIter { obj } => {
+                write!(f, "reached max iterations, current objective = {}", obj)
+            }
+        }
+    }
+}
+
 #[derive(Debug)]
 pub enum SolutionStatus {
     Optimal,

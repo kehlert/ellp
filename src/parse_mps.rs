@@ -1,6 +1,6 @@
 use crate::problem::{Bound, ConstraintOp, Problem};
 
-use log::error;
+use log::{debug, error};
 use thiserror::Error;
 
 use std::{collections::HashMap, iter::Peekable};
@@ -28,7 +28,7 @@ pub fn parse_mps(mps: &str) -> Result<Problem, MpsParsingError> {
 
     for (var_name, col) in cols {
         let var_name = var_name.to_string();
-        let bound = col.bound.unwrap_or(Bound::Free);
+        let bound = col.bound.unwrap_or(Bound::Lower(0.));
 
         //should never panic, we know that the var names are unique
         let var_id = prob
@@ -84,9 +84,9 @@ fn parse_rows_and_cols(mps: &str) -> Result<(Rows, Cols), MpsParsingError> {
 
     match lines.next() {
         Some(line) => {
-            let i = line.trim();
+            let line = line.trim();
 
-            if i != "ENDATA" {
+            if line != "ENDATA" {
                 return Err(MpsParsingError::new(format!(
                     "expected 'ENDATA', found '{}'",
                     line
@@ -105,16 +105,25 @@ fn parse_rows_and_cols(mps: &str) -> Result<(Rows, Cols), MpsParsingError> {
         return Err(MpsParsingError::new(format!("unexpected line: {}", line)));
     }
 
+    debug!(
+        "parsed {} rows and {} columns from mps file",
+        rows.len(),
+        cols.len()
+    );
+
     Ok((rows, cols))
 }
 
 fn parse_name(line: &str) -> Result<(), MpsParsingError> {
-    let mut i = line.split_whitespace();
+    let mut split_line = line.split_whitespace();
 
-    let name = i
-        .next()
-        .map(|tag| if tag == "NAME" { i.next() } else { None })
-        .flatten();
+    let name = split_line.next().and_then(|tag| {
+        if tag == "NAME" {
+            split_line.next()
+        } else {
+            None
+        }
+    });
 
     if name.is_none() {
         return Err(MpsParsingError::new(format!(
@@ -123,14 +132,8 @@ fn parse_name(line: &str) -> Result<(), MpsParsingError> {
         )));
     }
 
-    match i.next() {
-        Some(s) => Err(MpsParsingError::new(format!(
-            "unexpected input in NAME line: {}",
-            s
-        ))),
-
-        None => Ok(()),
-    }
+    //ignore everything after NAME
+    Ok(())
 }
 
 fn parse_rows<'a, I>(lines: &mut Peekable<I>) -> Result<Rows<'a>, MpsParsingError>
@@ -139,9 +142,9 @@ where
 {
     match lines.next() {
         Some(line) => {
-            let i = line.trim();
+            let line = line.trim();
 
-            if i != "ROWS" {
+            if line != "ROWS" {
                 return Err(MpsParsingError::new(format!(
                     "expected 'ROWS', found '{}'",
                     line
@@ -174,9 +177,9 @@ where
 }
 
 fn parse_row_line(line: &str) -> Result<(&str, Row), MpsParsingError> {
-    let mut i = line.split_whitespace();
+    let mut split_line = line.split_whitespace();
 
-    let constraint_op_char = i.next().ok_or_else(|| {
+    let constraint_op_char = split_line.next().ok_or_else(|| {
         MpsParsingError::new(format!(
             "expected a row type character in this line: {}",
             line
@@ -202,11 +205,11 @@ fn parse_row_line(line: &str) -> Result<(&str, Row), MpsParsingError> {
         }
     };
 
-    let row_name = i.next().ok_or_else(|| {
+    let row_name = split_line.next().ok_or_else(|| {
         MpsParsingError::new(format!("expected a row name in this line: {}", line))
     })?;
 
-    match i.next() {
+    match split_line.next() {
         Some(s) => Err(MpsParsingError::new(format!(
             "unexpected input in row line: {}",
             s
@@ -225,9 +228,9 @@ where
 {
     match lines.next() {
         Some(line) => {
-            let i = line.trim();
+            let line = line.trim();
 
-            if i != "COLUMNS" {
+            if line != "COLUMNS" {
                 return Err(MpsParsingError::new(format!(
                     "expected 'COLUMNS', found '{}'",
                     line
@@ -263,17 +266,17 @@ fn parse_column_line<'a>(
     rows: &mut Rows<'a>,
     cols: &mut Cols<'a>,
 ) -> Result<(), MpsParsingError> {
-    let mut i = line.split_whitespace();
+    let mut split_line = line.split_whitespace();
 
-    let var_name = i.next().ok_or_else(|| {
+    let var_name = split_line.next().ok_or_else(|| {
         MpsParsingError::new(format!("expected a column name in this line: {}", line))
     })?;
 
-    let row_name = i.next().ok_or_else(|| {
+    let row_name = split_line.next().ok_or_else(|| {
         MpsParsingError::new(format!("expected a row name in this line: {}", line))
     })?;
 
-    let coeff = i.next().ok_or_else(|| {
+    let coeff = split_line.next().ok_or_else(|| {
         MpsParsingError::new(format!("expected a coefficient in this line: {}", line))
     })?;
 
@@ -284,7 +287,7 @@ fn parse_column_line<'a>(
         ))
     })?;
 
-    if let Some(s) = i.next() {
+    if let Some(s) = split_line.next() {
         return Err(MpsParsingError::new(format!(
             "unexpected input '{}' in column line: {}",
             s, line
@@ -302,7 +305,7 @@ fn parse_column_line<'a>(
             Row::Constraint { coeffs, .. } => {
                 if coeffs.insert(var_name, coeff).is_some() {
                     return Err(MpsParsingError::new(format!(
-                        "specified constraint coefficient for the columne {} and row {} more than once",
+                        "specified constraint coefficient for the column {} and row {} more than once",
                         var_name, row_name
                     )));
                 }
@@ -317,7 +320,7 @@ fn parse_column_line<'a>(
         }
     }
 
-    match i.next() {
+    match split_line.next() {
         Some(s) => Err(MpsParsingError::new(format!(
             "unexpected input in column line: {}",
             s
@@ -333,9 +336,9 @@ where
 {
     match lines.next() {
         Some(line) => {
-            let i = line.trim();
+            let line = line.trim();
 
-            if i != "RHS" {
+            if line != "RHS" {
                 return Err(MpsParsingError::new(format!(
                     "expected 'RHS', found '{}'",
                     line
@@ -349,7 +352,7 @@ where
     while let Some(&line) = lines.peek() {
         let line = line.trim_start();
 
-        if line.starts_with("BOUNDS") {
+        if line.starts_with("BOUNDS") || line.starts_with("ENDATA") {
             break;
         }
 
@@ -361,13 +364,18 @@ where
 }
 
 fn parse_rhs_line(line: &str, rows: &mut Rows) -> Result<(), MpsParsingError> {
-    let mut i = line.split_whitespace().skip(1); //skip the name
+    let split_line_iter = line.split_whitespace();
+    let mut split_line = split_line_iter.clone();
 
-    let row_name = i.next().ok_or_else(|| {
+    if split_line_iter.count() == 3 {
+        split_line.next(); //skip the name
+    }
+
+    let row_name = split_line.next().ok_or_else(|| {
         MpsParsingError::new(format!("expected a row name in this line: {}", line))
     })?;
 
-    let rhs_val = i.next().ok_or_else(|| {
+    let rhs_val = split_line.next().ok_or_else(|| {
         MpsParsingError::new(format!("expected a rhs value in this line: {}", line))
     })?;
 
@@ -406,7 +414,7 @@ fn parse_rhs_line(line: &str, rows: &mut Rows) -> Result<(), MpsParsingError> {
         }
     }
 
-    match i.next() {
+    match split_line.next() {
         Some(s) => Err(MpsParsingError::new(format!(
             "unexpected input in column line: {}",
             s
@@ -420,11 +428,19 @@ fn parse_bounds<'a, I>(lines: &mut Peekable<I>, cols: &mut Cols) -> Result<(), M
 where
     I: Iterator<Item = &'a str>,
 {
+    if let Some(line) = lines.peek() {
+        if *line == "ENDATA" {
+            return Ok(()); //MPS file does not have a BOUNDS section
+        }
+    }
+
     match lines.next() {
         Some(line) => {
-            let i = line.trim();
+            let line = line.trim();
 
-            if i != "BOUNDS" {
+            if line == "ENDATA" {
+                return Ok(());
+            } else if line != "BOUNDS" {
                 return Err(MpsParsingError::new(format!(
                     "expected 'BOUNDS', found '{}'",
                     line
@@ -454,24 +470,28 @@ where
 }
 
 fn parse_bound_line(line: &str, cols: &mut Cols) -> Result<(), MpsParsingError> {
-    let mut i = line.split_whitespace();
+    let mut split_line = line.split_whitespace();
 
-    let bound_type = i.next().ok_or_else(|| {
+    let bound_type = split_line.next().ok_or_else(|| {
         MpsParsingError::new(format!("expected a bound type in this line: {}", line))
     })?;
 
-    i.next(); //skip bound name
+    split_line.next(); //skip bound name
 
-    let col_name = i.next().ok_or_else(|| {
+    let col_name = split_line.next().ok_or_else(|| {
         MpsParsingError::new(format!("expected a column name in this line: {}", line))
     })?;
 
-    let bound_val = i.next().map(str::parse::<f64>).transpose().map_err(|err| {
-        MpsParsingError::new(format!(
-            "could not parse the bound value\nerror: {}\nline: {}",
-            err, line
-        ))
-    })?;
+    let bound_val = split_line
+        .next()
+        .map(str::parse::<f64>)
+        .transpose()
+        .map_err(|err| {
+            MpsParsingError::new(format!(
+                "could not parse the bound value\nerror: {}\nline: {}",
+                err, line
+            ))
+        })?;
 
     let bound = match (bound_type, bound_val) {
         ("UP", Some(v)) => Bound::Upper(v),
@@ -515,7 +535,7 @@ fn parse_bound_line(line: &str, cols: &mut Cols) -> Result<(), MpsParsingError> 
         }
     }
 
-    match i.next() {
+    match split_line.next() {
         Some(s) => Err(MpsParsingError::new(format!(
             "unexpected input in column line: {}",
             s
@@ -527,11 +547,11 @@ fn parse_bound_line(line: &str, cols: &mut Cols) -> Result<(), MpsParsingError> 
 
 #[derive(Debug, Clone)]
 enum Row<'a> {
-    Objective, //keys are variable names
+    Objective,
 
     Constraint {
         op: ConstraintOp,
-        coeffs: HashMap<&'a str, f64>,
+        coeffs: HashMap<&'a str, f64>, //keys are variable names
         rhs: Option<f64>,
     },
 }
@@ -594,7 +614,7 @@ mod tests {
 
                 "ZTHREE" => {
                     assert!((var.obj_coeff - 9.) < EPSILON);
-                    assert_eq!(var.bound, Bound::Free);
+                    assert_eq!(var.bound, Bound::Lower(0.));
                 }
 
                 _ => panic!("unexpected variable: {}", var.name.as_ref().unwrap()),

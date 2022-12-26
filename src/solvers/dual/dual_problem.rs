@@ -126,9 +126,11 @@ impl std::convert::From<Problem> for Option<DualPhase1> {
                 })
                 .collect();
 
-            phase_1_prob
-                .add_constraint(coeffs, ConstraintOp::Eq, 0.)
-                .unwrap();
+            if !coeffs.is_empty() {
+                phase_1_prob
+                    .add_constraint(coeffs, ConstraintOp::Eq, 0.)
+                    .unwrap();
+            }
         }
 
         let std_form: StandardForm = match phase_1_prob.into() {

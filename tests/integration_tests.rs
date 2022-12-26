@@ -107,3 +107,21 @@ generate_tests! {
     small_prob_unbounded_2,
     beale_cycle,
 }
+
+#[cfg(feature = "benchmarks")]
+generate_tests! {
+    primal,
+    PrimalSimplexSolver::default(),
+    afiro,
+    adlittle,
+    blend,
+}
+
+#[cfg(feature = "benchmarks")]
+generate_tests! {
+    dual,
+    DualSimplexSolver::default(),
+    afiro,
+    adlittle,
+    blend,
+}

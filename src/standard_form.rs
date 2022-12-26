@@ -93,6 +93,11 @@ impl std::convert::From<Problem> for Option<StandardForm> {
 
         let total_vars = n + num_slack_vars;
 
+        debug!(
+            "adding {} slack vars to the existing {} vars, giving a total of {} total vars",
+            num_slack_vars, n, total_vars
+        );
+
         let mut c = nalgebra::DVector::zeros(total_vars);
         let mut A = nalgebra::DMatrix::zeros(m, total_vars);
         let mut b = nalgebra::DVector::zeros(A.nrows());
